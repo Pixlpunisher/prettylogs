@@ -1,0 +1,6 @@
+/prettylogs
+*.exe
+debug.log
+.DS_Store
+.env
+.env.*

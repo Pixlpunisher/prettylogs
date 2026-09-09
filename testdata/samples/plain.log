@@ -1,0 +1,4 @@
+2026-09-09 10:23:45 ERROR Database connection failed auth.service.ts:124
+2026-09-09 10:23:44 WARN Redis reconnection attempt 3/5
+INFO: Server listening on port 3000
+DEBUG: query plan cached

@@ -1,0 +1,4 @@
+{"level":"error","time":"2026-09-09T10:23:45Z","msg":"Database connection failed","file":"auth.service.ts","line":124}
+{"level":"warn","time":"2026-09-09T10:23:44Z","msg":"Redis reconnection attempt 3/5","file":"cache.service.ts","line":89}
+{"level":"info","time":"2026-09-09T10:23:43Z","msg":"Server listening on port 3000","file":"server.ts","line":12}
+{"severity":"DEBUG","timestamp":"2026-09-09T10:23:42Z","message":"query plan cached","logger":"database.ts"}

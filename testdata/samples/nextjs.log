@@ -1,0 +1,4 @@
+ready - started server on 0.0.0.0:3000, url: http://localhost:3000
+event - compiled client and server successfully in 2.3s
+ERROR: Module not found ./src/missing.ts
+  at Object.<anonymous> (/src/app/page.tsx:12)
