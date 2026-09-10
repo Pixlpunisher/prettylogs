@@ -112,6 +112,48 @@ func TestPlainParserLevelPrefixAndSource(t *testing.T) {
 	}
 }
 
+func TestPlainParserBracketedWarningTag(t *testing.T) {
+	t.Parallel()
+	line := `[WARNING] For this reason, future Maven versions might no longer support building such malformed projects.`
+	rec := parsePlain(line)
+	if rec.Level != record.LevelWarn {
+		t.Fatalf("level: got %q want WARN", rec.Level)
+	}
+	if rec.Message != "For this reason, future Maven versions might no longer support building such malformed projects." {
+		t.Fatalf("message: got %q", rec.Message)
+	}
+}
+
+func TestPlainParserBracketedErrorTag(t *testing.T) {
+	t.Parallel()
+	line := `[ERROR] something broke`
+	rec := parsePlain(line)
+	if rec.Level != record.LevelError {
+		t.Fatalf("level: got %q want ERROR", rec.Level)
+	}
+	if rec.Message != "something broke" {
+		t.Fatalf("message: got %q", rec.Message)
+	}
+}
+
+func TestInferFrontendLevelDetectsWarnFallback(t *testing.T) {
+	t.Parallel()
+	rec := parsePlain("retrying after warn from upstream, attempt 2")
+	if rec.Level != record.LevelWarn {
+		t.Fatalf("level: got %q want WARN (inferFrontendLevel fallback)", rec.Level)
+	}
+}
+
+func TestPlainParserRecognizesPanicAndCritical(t *testing.T) {
+	t.Parallel()
+	if rec := parsePlain("panic: index out of range [5] with length 3"); rec.Level != record.LevelError {
+		t.Fatalf("panic level: got %q want ERROR", rec.Level)
+	}
+	if rec := parsePlain("CRITICAL: disk full"); rec.Level != record.LevelError {
+		t.Fatalf("critical level: got %q want ERROR", rec.Level)
+	}
+}
+
 func TestAutoParserDetectsJSONOverLogfmt(t *testing.T) {
 	t.Parallel()
 	line := `{"level":"info","msg":"hi=there"}`
@@ -157,6 +199,53 @@ func TestAssemblerJoinsStackTrace(t *testing.T) {
 	}
 	if got[1].Level != record.LevelInfo {
 		t.Fatalf("second record level: %q", got[1].Level)
+	}
+}
+
+func TestAssemblerIgnoresWhitespaceOnlyLines(t *testing.T) {
+	t.Parallel()
+	a := NewAssembler(AutoParser{})
+	var got []record.Record
+	got = append(got, a.Feed("ERROR: boom")...)
+	got = append(got, a.Feed("   ")...)
+	got = append(got, a.Feed("INFO: next thing")...)
+	got = append(got, a.Flush()...)
+	if len(got) != 2 {
+		t.Fatalf("records: got %d want 2", len(got))
+	}
+	if got[0].Raw != "ERROR: boom" {
+		t.Fatalf("whitespace leaked into block: %q", got[0].Raw)
+	}
+}
+
+func TestAssemblerDoesNotSwallowIndentedInfoLines(t *testing.T) {
+	t.Parallel()
+	a := NewAssembler(AutoParser{})
+	var got []record.Record
+	// nx/npm indent grouped subprocess output for cosmetic alignment; none
+	// of these are stack-trace continuations and must stay separate records.
+	got = append(got, a.Feed("  [Nest] 1  - LOG [NestFactory] Starting Nest application...")...)
+	got = append(got, a.Feed("  [Nest] 1  - LOG [InstanceLoader] AppModule dependencies initialized")...)
+	got = append(got, a.Feed("  [Nest] 1  - LOG [NestApplication] Nest application successfully started")...)
+	got = append(got, a.Flush()...)
+	if len(got) != 3 {
+		t.Fatalf("records: got %d want 3 (indented INFO lines got merged): %+v", len(got), got)
+	}
+}
+
+func TestAssemblerStripsANSICodes(t *testing.T) {
+	t.Parallel()
+	a := NewAssembler(AutoParser{})
+	got := a.Feed("\x1b[32mINFO\x1b[0m: server started")
+	got = append(got, a.Flush()...)
+	if len(got) != 1 {
+		t.Fatalf("records: got %d want 1", len(got))
+	}
+	if strings.Contains(got[0].Raw, "\x1b") {
+		t.Fatalf("ANSI escape leaked into block: %q", got[0].Raw)
+	}
+	if got[0].Level != record.LevelInfo {
+		t.Fatalf("level: got %q want INFO", got[0].Level)
 	}
 }
 

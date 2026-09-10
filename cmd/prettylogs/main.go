@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -63,6 +65,20 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("start command: %w", err)
 		}
+		// #region agent log
+		func() {
+			f, e := os.OpenFile("/Users/tcontardo/Github/PrettyLogs/.cursor/debug-c9d99c.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if e != nil {
+				return
+			}
+			defer f.Close()
+			_ = json.NewEncoder(f).Encode(map[string]any{
+				"sessionId": "c9d99c", "hypothesisId": "B", "location": "main.go:run",
+				"message": "wrapper started, launching tui", "timestamp": time.Now().UnixMilli(),
+				"data": map[string]any{"cmd": args[0], "args": args[1:], "chanCap": 256},
+			})
+		}()
+		// #endregion
 		go func() {
 			_ = w.Wait()
 			close(logCh)

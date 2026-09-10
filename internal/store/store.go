@@ -95,6 +95,14 @@ func (s *Store) QueryError() error {
 	return s.queryErr
 }
 
+// Pattern returns the currently active search regexp, or nil if there is
+// no search query or the query failed to compile.
+func (s *Store) Pattern() *regexp.Regexp {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pattern
+}
+
 func (s *Store) SetLevel(level string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,6 +153,9 @@ func (s *Store) matches(r *record.Record) bool {
 }
 
 func removeID(in []*record.Record, id uint64) []*record.Record {
+	if len(in) > 0 && in[0].ID == id {
+		return in[1:]
+	}
 	for i, r := range in {
 		if r.ID == id {
 			return append(in[:i], in[i+1:]...)

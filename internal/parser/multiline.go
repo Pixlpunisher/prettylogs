@@ -3,18 +3,27 @@ package parser
 import (
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/tcontardo/prettylogs/internal/record"
 )
 
-func IsContinuation(line string) bool {
-	if line == "" {
+// IsContinuation reports whether line looks like it continues a stack trace
+// started by a record at prevLevel, rather than a new independent log entry.
+// Indentation alone isn't enough: tools like nx/npm indent whole subprocess
+// output streams for cosmetic grouping, which would otherwise glue unrelated
+// INFO lines onto whatever record happened to come first.
+func IsContinuation(prevLevel, line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
 		return false
 	}
-	if line[0] == ' ' || line[0] == '\t' {
+	if strings.HasPrefix(trimmed, "at ") || strings.HasPrefix(trimmed, "Caused by:") || strings.HasPrefix(trimmed, "... ") {
 		return true
 	}
-	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, "at ") || strings.HasPrefix(trimmed, "Caused by:")
+	if prevLevel != record.LevelError && prevLevel != record.LevelWarn {
+		return false
+	}
+	return line[0] == ' ' || line[0] == '\t'
 }
 
 type Assembler struct {
@@ -27,7 +36,11 @@ func NewAssembler(p Parser) *Assembler {
 }
 
 func (a *Assembler) Feed(line string) []record.Record {
-	if a.pending != nil && IsContinuation(line) {
+	line = ansi.Strip(line)
+	if strings.TrimSpace(line) == "" {
+		return nil
+	}
+	if a.pending != nil && IsContinuation(a.pending.Level, line) {
 		a.pending.Raw += "\n" + line
 		if a.pending.Message != "" {
 			a.pending.Message += "\n" + line

@@ -27,6 +27,9 @@ type Model struct {
 	selected int
 	expanded map[uint64]bool
 
+	detailScrollKey    uint64 // row.key() the offset below applies to; 0 = none
+	detailScrollOffset int    // first visible detail-content line index
+
 	searchInput textinput.Model
 	searching   bool
 	filtering   bool
@@ -35,6 +38,8 @@ type Model struct {
 
 	sourceStatus string
 	follow       bool
+
+	colorProfile string // diagnostic: what bubbletea detected, shown in footer
 }
 
 func New(st *store.Store, logs <-chan record.Record, cfg config.Config, w *wrapper.Wrapper, source string) Model {
@@ -78,7 +83,7 @@ func waitForLog(ch <-chan record.Record) tea.Cmd {
 }
 
 func (m *Model) clampSelected() {
-	n := len(m.store.Filtered())
+	n := len(m.rows())
 	if n == 0 {
 		m.selected = 0
 		return
@@ -92,7 +97,11 @@ func (m *Model) clampSelected() {
 }
 
 func (m *Model) move(delta int) {
-	n := len(m.store.Filtered())
+	if r, ok := m.currentRow(); ok && m.detailScrollActive(r) {
+		m.scrollDetail(r, delta)
+		return
+	}
+	n := len(m.rows())
 	if n == 0 {
 		m.selected = 0
 		m.follow = true
@@ -101,6 +110,19 @@ func (m *Model) move(delta int) {
 	m.selected += delta
 	m.clampSelected()
 	m.follow = m.selected == n-1
+}
+
+// movePage pages in direction dir (-1/+1): a page of rows via pageSize()
+// when navigating the row list, or a page of detail-content lines
+// (detailCapacity()) when the selected row is in detail-scroll mode — these
+// are different units, so paging is split out of move() rather than having
+// move() reinterpret its delta by magnitude.
+func (m *Model) movePage(dir int) {
+	if r, ok := m.currentRow(); ok && m.detailScrollActive(r) {
+		m.scrollDetail(r, dir*m.detailCapacity())
+		return
+	}
+	m.move(dir * m.pageSize())
 }
 
 func (m *Model) pageSize() int {
@@ -125,10 +147,10 @@ func (m *Model) bodyHeight() int {
 	return h
 }
 
-func (m Model) currentRecord() *record.Record {
-	entries := m.store.Filtered()
-	if m.selected < 0 || m.selected >= len(entries) {
-		return nil
+func (m Model) currentRow() (row, bool) {
+	rows := m.rows()
+	if m.selected < 0 || m.selected >= len(rows) {
+		return row{}, false
 	}
-	return entries[m.selected]
+	return rows[m.selected], true
 }

@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/tcontardo/prettylogs/internal/record"
 )
+
+var debugConsumeCount int
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -16,16 +19,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchInput.SetWidth(max(10, m.width-20))
 		return m, nil
 
+	case tea.ColorProfileMsg:
+		m.colorProfile = msg.String()
+		return m, nil
+
 	case logMsg:
 		wasFollow := m.follow
 		m.store.Add(msg.rec)
 		if wasFollow {
-			n := len(m.store.Filtered())
+			n := len(m.rows())
 			if n > 0 {
 				m.selected = n - 1
 			}
 		}
 		m.clampSelected()
+		// #region agent log
+		debugConsumeCount++
+		if debugConsumeCount == 1 || debugConsumeCount%25 == 0 {
+			preview := msg.rec.Message
+			if len(preview) > 80 {
+				preview = preview[:80]
+			}
+			tuiAgentLog("A", "update.go:logMsg", "tui consumed", map[string]any{"n": debugConsumeCount, "storeLen": m.store.Len(), "preview": preview})
+		}
+		// #endregion
 		return m, waitForLog(m.logs)
 
 	case sourceDoneMsg:
@@ -38,6 +55,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.sourceStatus == "running" || m.sourceStatus == "stdin" {
 			m.sourceStatus = "eof"
 		}
+		// #region agent log
+		tuiAgentLog("D", "update.go:sourceDoneMsg", "source done", map[string]any{"status": m.sourceStatus, "consumed": debugConsumeCount, "storeLen": m.store.Len()})
+		// #endregion
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -77,21 +97,40 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		m.move(-1)
 	case "g":
-		m.selected = 0
-		m.follow = false
-	case "G", "shift+g":
-		n := len(m.store.Filtered())
-		if n > 0 {
-			m.selected = n - 1
+		if r, ok := m.currentRow(); ok && m.detailScrollActive(r) {
+			m.detailScrollKey = r.key()
+			m.detailScrollOffset = 0
+		} else {
+			m.selected = 0
+			m.follow = false
 		}
-		m.follow = true
+	case "G", "shift+g":
+		if r, ok := m.currentRow(); ok && m.detailScrollActive(r) {
+			lines, visible, _, _ := m.detailWindow(r)
+			max := len(lines) - len(visible)
+			if max < 0 {
+				max = 0
+			}
+			m.detailScrollKey = r.key()
+			m.detailScrollOffset = max
+		} else {
+			n := len(m.rows())
+			if n > 0 {
+				m.selected = n - 1
+			}
+			m.follow = true
+		}
 	case "pgdown", "ctrl+j":
-		m.move(m.pageSize())
+		m.movePage(1)
 	case "pgup", "ctrl+k":
-		m.move(-m.pageSize())
+		m.movePage(-1)
 	case "enter":
-		if rec := m.currentRecord(); rec != nil {
-			m.expanded[rec.ID] = !m.expanded[rec.ID]
+		if r, ok := m.currentRow(); ok {
+			key := r.key()
+			m.expanded[key] = !m.expanded[key]
+			if !m.expanded[key] && m.detailScrollKey == key {
+				m.detailScrollOffset = 0
+			}
 		}
 	case "/":
 		m.searching = true
@@ -180,60 +219,65 @@ func indexOf(items []string, want string) int {
 	return -1
 }
 
-func (m Model) entryHeight(rec *record.Record) int {
-	if rec == nil {
-		return 0
+func (m Model) entryHeight(r row) int {
+	if !m.expanded[r.key()] {
+		if r.kind == rowGroup {
+			return 2 // header + "folded" hint — unchanged collapsed group shape
+		}
+		return 1 // dense single-line record
 	}
-	h := 2
-	if m.expanded[rec.ID] {
-		extra := 0
-		raw := rec.Raw
-		for i := 0; i < len(raw); i++ {
-			if raw[i] == '\n' {
-				extra++
-			}
-		}
-		if extra == 0 && rec.Message != record.FirstLine(rec.Message) {
-			for i := 0; i < len(rec.Message); i++ {
-				if rec.Message[i] == '\n' {
-					extra++
-				}
-			}
-		}
-		extra += len(rec.Extra)
-		if extra < 1 {
-			extra = 1
-		}
-		h += extra
+	_, visible, indicator, _ := m.detailWindow(r)
+	h := 1 + len(visible)
+	if indicator {
+		h++
 	}
 	return h
 }
 
-func (m Model) visibleRange(entries []*record.Record, bodyHeight int) (int, int) {
-	if len(entries) == 0 || bodyHeight <= 0 {
+func (m Model) visibleRange(rows []row, bodyHeight int) (int, int) {
+	if len(rows) == 0 || bodyHeight <= 0 {
 		return 0, 0
 	}
 	sel := m.selected
 	if sel < 0 {
 		sel = 0
 	}
-	if sel >= len(entries) {
-		sel = len(entries) - 1
+	if sel >= len(rows) {
+		sel = len(rows) - 1
 	}
 	start := sel
-	used := m.entryHeight(entries[sel])
-	for start > 0 && used+m.entryHeight(entries[start-1]) <= bodyHeight {
+	used := m.entryHeight(rows[sel])
+	for start > 0 && used+m.entryHeight(rows[start-1]) <= bodyHeight {
 		start--
-		used += m.entryHeight(entries[start])
+		used += m.entryHeight(rows[start])
 	}
 	end := sel + 1
-	for end < len(entries) && used+m.entryHeight(entries[end]) <= bodyHeight {
-		used += m.entryHeight(entries[end])
+	for end < len(rows) && used+m.entryHeight(rows[end]) <= bodyHeight {
+		used += m.entryHeight(rows[end])
 		end++
 	}
-	for start > 0 && used+m.entryHeight(entries[start-1]) <= bodyHeight {
+	for start > 0 && used+m.entryHeight(rows[start-1]) <= bodyHeight {
 		start--
-		used += m.entryHeight(entries[start])
+		used += m.entryHeight(rows[start])
 	}
 	return start, end
 }
+
+// #region agent log
+func tuiAgentLog(hid, loc, msg string, data map[string]any) {
+	f, err := os.OpenFile("/Users/tcontardo/Github/PrettyLogs/.cursor/debug-c9d99c.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_ = json.NewEncoder(f).Encode(map[string]any{
+		"sessionId":    "c9d99c",
+		"hypothesisId": hid,
+		"location":     loc,
+		"message":      msg,
+		"data":         data,
+		"timestamp":    time.Now().UnixMilli(),
+	})
+}
+
+// #endregion

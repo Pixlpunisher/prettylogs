@@ -3,15 +3,15 @@ package tui
 const helpText = `prettylogs - Keyboard Shortcuts
 
 Navigation
-  j / ↓     Move down
-  k / ↑     Move up
-  g         Go to first line
-  G         Go to last line
-  PageDown  Page down
-  PageUp    Page up
+  j / ↓     Move down (scrolls expanded detail if it doesn't fit)
+  k / ↑     Move up (scrolls expanded detail if it doesn't fit)
+  g         Go to first line (top of detail, if scrolling one)
+  G         Go to last line (bottom of detail, if scrolling one)
+  PageDown  Page down (pages through detail, if scrolling one)
+  PageUp    Page up (pages through detail, if scrolling one)
 
 Interaction
-  Enter     Expand/collapse selected entry
+  Enter     Expand/collapse selected entry or group
   /         Search (regex)
   n         Next match
   N         Previous match

@@ -10,7 +10,7 @@ import (
 type PlainParser struct{}
 
 var (
-	levelPrefix = regexp.MustCompile(`(?i)^\s*(ERROR|ERR|WARN(?:ING)?|INFO|DEBUG|TRACE|FATAL)[:\s-]+\s*(.*)$`)
+	levelPrefix = regexp.MustCompile(`(?i)^\s*\[?(ERROR|ERR|WARN(?:ING)?|INFO|DEBUG|TRACE|FATAL|PANIC|CRITICAL|CRIT|SEVERE)\]?[:\s-]+\s*(.*)$`)
 	leadingTime = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s+(.*)$`)
 	sourceRef   = regexp.MustCompile(`([\w./\\-]+\.\w+:\d+)`)
 )
@@ -53,7 +53,8 @@ func parsePlain(line string) record.Record {
 func inferFrontendLevel(line string) string {
 	lower := strings.ToLower(line)
 	switch {
-	case strings.Contains(lower, "error"), strings.Contains(lower, "failed"), strings.Contains(lower, "fatal"):
+	case strings.Contains(lower, "error"), strings.Contains(lower, "failed"), strings.Contains(lower, "fatal"),
+		strings.Contains(lower, "panic"), strings.Contains(lower, "critical"):
 		if strings.Contains(lower, "compiled successfully") {
 			return record.LevelInfo
 		}
@@ -64,6 +65,8 @@ func inferFrontendLevel(line string) string {
 		return record.LevelInfo
 	case strings.HasPrefix(line, "Compiled"), strings.HasPrefix(line, "Compiling"):
 		return record.LevelInfo
+	case strings.Contains(lower, "warn"):
+		return record.LevelWarn
 	default:
 		return record.LevelInfo
 	}
