@@ -71,3 +71,22 @@ func inferFrontendLevel(line string) string {
 		return record.LevelInfo
 	}
 }
+
+// CompilePhase reports whether line starts or ends a compile cycle.
+// End is checked first so "Compiled successfully" is not treated as a start.
+func CompilePhase(line string) (start, end bool) {
+	lower := strings.ToLower(line)
+	switch {
+	case strings.Contains(lower, "compiled") && strings.Contains(lower, "successfully"),
+		strings.Contains(lower, "ready - started server"),
+		strings.Contains(lower, "listening on"),
+		strings.Contains(lower, "local: http://"):
+		return false, true
+	case strings.Contains(lower, "compiling"),
+		strings.Contains(lower, "starting compilation"),
+		strings.Contains(lower, "rebuild"):
+		return true, false
+	default:
+		return false, false
+	}
+}

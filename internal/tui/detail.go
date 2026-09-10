@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/tcontardo/prettylogs/internal/record"
 )
 
@@ -37,7 +39,47 @@ func (m Model) detailLines(r row) []string {
 	if r.rec == nil {
 		return nil
 	}
-	return strings.Split(m.detailText(r.rec), "\n")
+	text := m.detailText(r.rec)
+	if text == "" {
+		return nil
+	}
+	return wrapToWidth(strings.Split(text, "\n"), m.detailContentWidth())
+}
+
+const (
+	spineChrome  = 2
+	detailIndent = 4
+)
+
+// detailContentWidth is the wrap budget for record detail: spine
+// border+padding and the Detail style's left indent.
+func (m Model) detailContentWidth() int {
+	w := m.width - spineChrome - detailIndent
+	if w < 1 {
+		return 1
+	}
+	return w
+}
+
+func wrapToWidth(lines []string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, wrapLine(line, width)...)
+	}
+	return out
+}
+
+func wrapLine(s string, width int) []string {
+	if s == "" {
+		return []string{""}
+	}
+	if lipgloss.Width(s) <= width {
+		return []string{s}
+	}
+	return strings.Split(lipgloss.NewStyle().Width(width).Render(s), "\n")
 }
 
 // detailWindow computes, for row r's expanded detail: the full line slice,
@@ -60,15 +102,7 @@ func (m Model) detailWindow(r row) (lines, visible []string, indicator bool, off
 		offset = m.detailScrollOffset
 	}
 	maxOffset := total - visibleN
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	if offset > maxOffset {
-		offset = maxOffset
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	offset = clamp(offset, 0, maxOffset)
 	return lines, lines[offset : offset+visibleN], true, offset
 }
 
@@ -88,18 +122,21 @@ func (m Model) detailScrollActive(r row) bool {
 func (m *Model) scrollDetail(r row, delta int) {
 	lines, visible, _, offset := m.detailWindow(r)
 	maxOffset := len(lines) - len(visible)
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	offset += delta
-	if offset < 0 {
-		offset = 0
-	}
-	if offset > maxOffset {
-		offset = maxOffset
-	}
 	m.detailScrollKey = r.key()
-	m.detailScrollOffset = offset
+	m.detailScrollOffset = clamp(offset+delta, 0, maxOffset)
+}
+
+func clamp(v, lo, hi int) int {
+	if hi < lo {
+		hi = lo
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // scrollIndicatorText formats the 1-based inclusive visible line range.

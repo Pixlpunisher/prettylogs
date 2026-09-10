@@ -10,8 +10,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tcontardo/prettylogs/internal/config"
+	"github.com/tcontardo/prettylogs/internal/parser"
 	"github.com/tcontardo/prettylogs/internal/record"
 	"github.com/tcontardo/prettylogs/internal/store"
+	"github.com/tcontardo/prettylogs/internal/wrapper"
 )
 
 func keyMsg(s string) tea.KeyPressMsg {
@@ -23,7 +25,7 @@ func newTestModel(recs ...record.Record) Model {
 	for _, rec := range recs {
 		st.Add(rec)
 	}
-	m := New(st, nil, config.Default(), nil, "stdin")
+	m := New(st, nil, config.Default(), nil)
 	m.width = 80
 	m.height = 24
 	return m
@@ -62,6 +64,25 @@ func TestEnterTogglesDetail(t *testing.T) {
 	expanded := m.View().Content
 	if !strings.Contains(expanded, "Pool.connect") {
 		t.Fatalf("stack should show when expanded:\n%s", expanded)
+	}
+}
+
+func TestCollapseDeletesExpandedKey(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(record.Record{
+		Level:   record.LevelError,
+		Message: "boom",
+		Raw:     "boom\n  at Pool.connect (/src/db/pool.ts:45)",
+	})
+	updated, _ := m.handleKey(keyMsg("enter"))
+	m = updated.(Model)
+	if len(m.expanded) != 1 {
+		t.Fatalf("expand should store one key, got %v", m.expanded)
+	}
+	updated, _ = m.handleKey(keyMsg("enter"))
+	m = updated.(Model)
+	if len(m.expanded) != 0 {
+		t.Fatalf("collapse should delete the key, got %v", m.expanded)
 	}
 }
 
@@ -416,5 +437,252 @@ func TestHelpOverlay(t *testing.T) {
 	content := m.View().Content
 	if !strings.Contains(content, "Keyboard Shortcuts") {
 		t.Fatalf("help missing:\n%s", content)
+	}
+}
+
+func TestFooterOmitsColorProfile(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	m.colorProfile = "TrueColor"
+	content := ansi.Strip(m.View().Content)
+	if strings.Contains(content, "color:") {
+		t.Fatalf("footer should not show color profile:\n%s", content)
+	}
+}
+
+func TestHelpShowsColorProfile(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	m.colorProfile = "TrueColor"
+	updated, _ := m.handleKey(keyMsg("?"))
+	m = updated.(Model)
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "Color profile: TrueColor") {
+		t.Fatalf("help should show color profile:\n%s", content)
+	}
+}
+
+func TestExpandedListIgnoresNewLogs(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(record.Record{Level: record.LevelError, Message: "boom", Raw: "boom"})
+	updated, _ := m.handleKey(keyMsg("enter"))
+	m = updated.(Model)
+	updated, _ = m.Update(logMsg{rec: record.Record{Level: record.LevelInfo, Message: "should-not-appear", Raw: "should-not-appear"}})
+	m = updated.(Model)
+	if strings.Contains(ansi.Strip(m.View().Content), "should-not-appear") {
+		t.Fatal("new logs should not join the list while a row is expanded")
+	}
+	updated, _ = m.handleKey(keyMsg("enter"))
+	m = updated.(Model)
+	if !strings.Contains(ansi.Strip(m.View().Content), "should-not-appear") {
+		t.Fatal("new logs should appear after collapse")
+	}
+}
+
+func TestDetailTextExtraOrderIsStable(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	rec := record.Record{
+		Level:   record.LevelError,
+		Message: "boom",
+		Raw:     "boom",
+		Extra: map[string]string{
+			"service.name":    "api",
+			"ecs.version":     "1.2.0",
+			"service.version": "0.0.1",
+		},
+	}
+	first := m.detailText(&rec)
+	for i := 0; i < 20; i++ {
+		got := m.detailText(&rec)
+		if got != first {
+			t.Fatalf("detail reshuffled on call %d:\n%s\nvs\n%s", i, first, got)
+		}
+	}
+	if !strings.HasPrefix(first, "ecs.version:") {
+		t.Fatalf("extra keys should be sorted, got:\n%s", first)
+	}
+}
+
+func TestDetailTextShowsPrettyJSON(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	raw := `{"level":"error","message":"boom","service.name":"api","ecs.version":"1.2.0"}`
+	got := m.detailText(&record.Record{
+		Level:   record.LevelError,
+		Message: "boom",
+		Raw:     raw,
+		Extra:   map[string]string{"service.name": "api", "ecs.version": "1.2.0"},
+	})
+	if !strings.Contains(got, `"service.name"`) || !strings.Contains(got, "api") {
+		t.Fatalf("expanded JSON should show the full object:\n%s", got)
+	}
+	if strings.Count(got, "\n") < 2 {
+		t.Fatalf("JSON should be pretty-printed:\n%s", got)
+	}
+}
+
+func TestExpandedSingleLineRecordDoesNotRepeatMessage(t *testing.T) {
+	t.Parallel()
+	const msg = "Failed to execute goal org.apache.maven.plugins:foo"
+	m := newTestModel(record.Record{Level: record.LevelError, Message: msg, Raw: msg})
+	updated, _ := m.handleKey(keyMsg("enter"))
+	m = updated.(Model)
+	content := ansi.Strip(m.View().Content)
+	if strings.Count(content, msg) != 1 {
+		t.Fatalf("expanded single-line record should not repeat the message:\n%s", content)
+	}
+}
+
+func headerText(m Model) string {
+	m.width = 120
+	return ansi.Strip(m.headerView())
+}
+
+func TestHeaderShowsRunningOnFreshModel(t *testing.T) {
+	t.Parallel()
+	got := headerText(newTestModel())
+	if !strings.Contains(got, "Running") {
+		t.Fatalf("header should show Running:\n%s", got)
+	}
+	if strings.Contains(got, "Compiling") {
+		t.Fatalf("stdin model should not show Compiling:\n%s", got)
+	}
+	if strings.Contains(got, "Exited") {
+		t.Fatalf("header should not show Exited while running:\n%s", got)
+	}
+}
+
+func TestHeaderShowsCompilingWhenWrapperStarts(t *testing.T) {
+	t.Parallel()
+	m := New(store.New(100), nil, config.Default(), wrapper.Live())
+	got := headerText(m)
+	if !strings.Contains(got, "Compiling..") {
+		t.Fatalf("wrapped command should start as Compiling..:\n%s", got)
+	}
+}
+
+func TestHeaderCompileCycle(t *testing.T) {
+	t.Parallel()
+	m := New(store.New(100), nil, config.Default(), wrapper.Live())
+	updated, _ := m.Update(logMsg{rec: record.Record{Level: record.LevelInfo, Message: "Compiling...", Raw: "Compiling..."}})
+	m = updated.(Model)
+	got := headerText(m)
+	if !strings.Contains(got, "Compiling..") {
+		t.Fatalf("compile-start should show Compiling..:\n%s", got)
+	}
+	updated, _ = m.Update(logMsg{rec: record.Record{Level: record.LevelInfo, Message: "Compiled successfully in 4.2s", Raw: "Compiled successfully in 4.2s"}})
+	got = headerText(updated.(Model))
+	if !strings.Contains(got, "Compiling..") {
+		t.Fatalf("compile-end without a listening port should stay Compiling..:\n%s", got)
+	}
+	if strings.Contains(got, "Running") {
+		t.Fatalf("Running requires a listening port:\n%s", got)
+	}
+	updated, _ = updated.(Model).Update(logMsg{rec: record.Record{Level: record.LevelInfo, Message: "Compiling...", Raw: "Compiling..."}})
+	got = headerText(updated.(Model))
+	if !strings.Contains(got, "Compiling..") {
+		t.Fatalf("HMR compile-start should stay Compiling..:\n%s", got)
+	}
+}
+
+func TestListenTickSetsRunningWhenPortOpen(t *testing.T) {
+	out := make(chan record.Record, 8)
+	w, err := wrapper.StartCommand("python3", []string{"-c", "import socket,time; s=socket.socket(); s.bind(('127.0.0.1',0)); s.listen(1); time.sleep(8)"}, parser.AutoParser{}, out)
+	if err != nil {
+		t.Skipf("start listener: %v", err)
+	}
+	defer func() { _ = w.Stop() }()
+	deadline := time.Now().Add(3 * time.Second)
+	for !w.HasListeningPort() {
+		if time.Now().After(deadline) {
+			t.Fatal("listener never opened a port")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	m := New(store.New(100), nil, config.Default(), w)
+	if !strings.Contains(headerText(m), "Compiling..") {
+		t.Fatalf("wrapped command should start Compiling..:\n%s", headerText(m))
+	}
+	updated, _ := m.Update(listenTickMsg{})
+	got := headerText(updated.(Model))
+	if !strings.Contains(got, "Running") {
+		t.Fatalf("listening port should show Running:\n%s", got)
+	}
+}
+
+func TestHeaderShowsExitedAfterSourceDone(t *testing.T) {
+	t.Parallel()
+	updated, _ := newTestModel().Update(sourceDoneMsg{})
+	got := headerText(updated.(Model))
+	if !strings.Contains(got, "Exited") {
+		t.Fatalf("header should show Exited after source ends:\n%s", got)
+	}
+	if strings.Contains(got, "Running") {
+		t.Fatalf("header should not show Running after source ends:\n%s", got)
+	}
+}
+
+func TestHeaderShowsExitedWithExitCode(t *testing.T) {
+	t.Parallel()
+	const exitCode = 42
+	m := newTestModel()
+	m.wrapper = wrapper.Exited(exitCode)
+	updated, _ := m.Update(sourceDoneMsg{})
+	got := headerText(updated.(Model))
+	if !strings.Contains(got, "Exited") {
+		t.Fatalf("header should show Exited:\n%s", got)
+	}
+	if !strings.Contains(got, strconv.Itoa(exitCode)) {
+		t.Fatalf("header should include exit code %d:\n%s", exitCode, got)
+	}
+}
+
+const longErrorTail = "UNIQUE_TAIL"
+
+func longErrorModel() Model {
+	const hdr = "Failed to execute goal"
+	raw := hdr + "\n" + strings.Repeat("x", 2000) + longErrorTail
+	return newTestModel(record.Record{
+		Level:   record.LevelError,
+		Message: hdr,
+		Raw:     raw,
+	})
+}
+
+func TestExpandedLongErrorFitsBody(t *testing.T) {
+	t.Parallel()
+	m := longErrorModel()
+	updated, _ := m.handleKey(keyMsg("enter"))
+	m = updated.(Model)
+	rows := m.rows()
+	if len(rows) != 1 {
+		t.Fatalf("rows: got %d want 1", len(rows))
+	}
+	if h := m.entryHeight(rows[0]); h > m.bodyHeight() {
+		t.Fatalf("entryHeight %d exceeds bodyHeight %d", h, m.bodyHeight())
+	}
+	content := ansi.Strip(m.View().Content)
+	if lines := strings.Count(content, "\n") + 1; lines > m.height {
+		t.Fatalf("view is taller than the terminal (%d > %d):\n%s", lines, m.height, content)
+	}
+	if !strings.Contains(content, "? help") {
+		t.Fatalf("footer should remain visible:\n%s", content)
+	}
+	if strings.Contains(content, longErrorTail) {
+		t.Fatalf("long-line tail should not be visible until scrolled:\n%s", content)
+	}
+}
+
+func TestExpandedLongErrorScrollReachesTail(t *testing.T) {
+	t.Parallel()
+	m := longErrorModel()
+	updated, _ := m.handleKey(keyMsg("enter"))
+	m = updated.(Model)
+	updated, _ = m.handleKey(keyMsg("G"))
+	m = updated.(Model)
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, longErrorTail) {
+		t.Fatalf("paging to the bottom of detail should show the long-line tail:\n%s", content)
 	}
 }

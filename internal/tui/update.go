@@ -1,9 +1,11 @@
 package tui
 
 import (
-	"fmt"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/tcontardo/prettylogs/internal/parser"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -28,17 +30,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.clampSelected()
-		return m, waitForLog(m.logs)
+		cmd := m.applyCompilePhase(msg.rec.Message)
+		return m, tea.Batch(waitForLog(m.logs), cmd)
+
+	case listenTickMsg:
+		m.promoteIfListening()
+		return m, listenTickCmd(m)
 
 	case sourceDoneMsg:
+		m.status = statusExited
 		if m.wrapper != nil {
 			if code, ok := m.wrapper.ExitCode(); ok {
-				m.sourceStatus = fmt.Sprintf("exited %d", code)
-			} else {
-				m.sourceStatus = "exited"
+				m.exitCode = &code
 			}
-		} else if m.sourceStatus == "running" || m.sourceStatus == "stdin" {
-			m.sourceStatus = "eof"
 		}
 		return m, nil
 
@@ -52,19 +56,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	if m.help {
-		if key == "?" || key == "esc" || key == "q" {
-			m.help = false
-			if key == "q" && !m.searching {
-				return m.quit()
-			}
-		}
-		return m, nil
+		return m.handleHelpKey(key)
 	}
-
 	if m.searching {
 		return m.handleSearch(msg)
 	}
-
 	if m.filtering {
 		return m.handleFilter(key)
 	}
@@ -79,41 +75,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "k", "up":
 		m.move(-1)
 	case "g":
-		if r, ok := m.currentRow(); ok && m.detailScrollActive(r) {
-			m.detailScrollKey = r.key()
-			m.detailScrollOffset = 0
-		} else {
-			m.selected = 0
-			m.follow = false
-		}
+		m.goFirst()
 	case "G", "shift+g":
-		if r, ok := m.currentRow(); ok && m.detailScrollActive(r) {
-			lines, visible, _, _ := m.detailWindow(r)
-			max := len(lines) - len(visible)
-			if max < 0 {
-				max = 0
-			}
-			m.detailScrollKey = r.key()
-			m.detailScrollOffset = max
-		} else {
-			n := len(m.rows())
-			if n > 0 {
-				m.selected = n - 1
-			}
-			m.follow = true
-		}
+		m.goLast()
 	case "pgdown", "ctrl+j":
 		m.movePage(1)
 	case "pgup", "ctrl+k":
 		m.movePage(-1)
 	case "enter":
-		if r, ok := m.currentRow(); ok {
-			key := r.key()
-			m.expanded[key] = !m.expanded[key]
-			if !m.expanded[key] && m.detailScrollKey == key {
-				m.detailScrollOffset = 0
-			}
-		}
+		return m, m.toggleExpand()
 	case "/":
 		m.searching = true
 		m.searchInput.SetValue(m.store.Query())
@@ -130,6 +100,57 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m Model) handleHelpKey(key string) (tea.Model, tea.Cmd) {
+	if key == "?" || key == "esc" || key == "q" {
+		m.help = false
+		if key == "q" && !m.searching {
+			return m.quit()
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) goFirst() {
+	if r, ok := m.currentRow(); ok && m.detailScrollActive(r) {
+		m.detailScrollKey = r.key()
+		m.detailScrollOffset = 0
+		return
+	}
+	m.selected = 0
+	m.follow = false
+}
+
+func (m *Model) goLast() {
+	if r, ok := m.currentRow(); ok && m.detailScrollActive(r) {
+		lines, visible, _, _ := m.detailWindow(r)
+		m.detailScrollKey = r.key()
+		m.detailScrollOffset = clamp(len(lines)-len(visible), 0, len(lines)-len(visible))
+		return
+	}
+	if n := len(m.rows()); n > 0 {
+		m.selected = n - 1
+	}
+	m.follow = true
+}
+
+func (m *Model) toggleExpand() tea.Cmd {
+	r, ok := m.currentRow()
+	if !ok {
+		return nil
+	}
+	key := r.key()
+	if m.expanded[key] {
+		delete(m.expanded, key)
+		if m.detailScrollKey == key {
+			m.detailScrollOffset = 0
+		}
+	} else {
+		m.expanded[key] = true
+	}
+	m.syncExpandFreeze()
+	return listenTickCmd(*m)
 }
 
 func (m Model) handleSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -190,6 +211,68 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 		_ = m.wrapper.Stop()
 	}
 	return m, tea.Quit
+}
+
+func (m *Model) applyCompilePhase(line string) tea.Cmd {
+	if m.status == statusExited {
+		return nil
+	}
+	start, end := parser.CompilePhase(line)
+	if start {
+		m.compileHold = true
+		m.status = statusCompiling
+		return nil
+	}
+	if end {
+		m.compileHold = false
+		m.promoteIfListening()
+		return listenTickCmd(*m)
+	}
+	return nil
+}
+
+func (m *Model) promoteIfListening() {
+	if m.status == statusExited || m.compileHold || m.wrapper == nil {
+		return
+	}
+	if m.wrapper.HasListeningPort() {
+		m.status = statusRunning
+	}
+}
+
+func (m *Model) syncExpandFreeze() {
+	if !m.hasExpanded() {
+		m.freezeID = 0
+		m.frozenCounts = nil
+		return
+	}
+	if m.freezeID == 0 {
+		m.freezeID = m.store.MaxID()
+		m.frozenCounts = m.store.Counts()
+	}
+}
+
+func (m Model) hasExpanded() bool {
+	return len(m.expanded) > 0
+}
+
+func needsListenTick(m Model) bool {
+	if m.wrapper == nil || m.status == statusExited || m.status == statusRunning {
+		return false
+	}
+	if m.compileHold || m.hasExpanded() {
+		return false
+	}
+	return true
+}
+
+func listenTickCmd(m Model) tea.Cmd {
+	if !needsListenTick(m) {
+		return nil
+	}
+	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+		return listenTickMsg{}
+	})
 }
 
 func indexOf(items []string, want string) int {
