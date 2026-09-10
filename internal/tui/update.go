@@ -1,15 +1,10 @@
 package tui
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
-
-var debugConsumeCount int
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -33,16 +28,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.clampSelected()
-		// #region agent log
-		debugConsumeCount++
-		if debugConsumeCount == 1 || debugConsumeCount%25 == 0 {
-			preview := msg.rec.Message
-			if len(preview) > 80 {
-				preview = preview[:80]
-			}
-			tuiAgentLog("A", "update.go:logMsg", "tui consumed", map[string]any{"n": debugConsumeCount, "storeLen": m.store.Len(), "preview": preview})
-		}
-		// #endregion
 		return m, waitForLog(m.logs)
 
 	case sourceDoneMsg:
@@ -55,9 +40,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.sourceStatus == "running" || m.sourceStatus == "stdin" {
 			m.sourceStatus = "eof"
 		}
-		// #region agent log
-		tuiAgentLog("D", "update.go:sourceDoneMsg", "source done", map[string]any{"status": m.sourceStatus, "consumed": debugConsumeCount, "storeLen": m.store.Len()})
-		// #endregion
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -262,22 +244,3 @@ func (m Model) visibleRange(rows []row, bodyHeight int) (int, int) {
 	}
 	return start, end
 }
-
-// #region agent log
-func tuiAgentLog(hid, loc, msg string, data map[string]any) {
-	f, err := os.OpenFile("/Users/tcontardo/Github/PrettyLogs/.cursor/debug-c9d99c.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	_ = json.NewEncoder(f).Encode(map[string]any{
-		"sessionId":    "c9d99c",
-		"hypothesisId": hid,
-		"location":     loc,
-		"message":      msg,
-		"data":         data,
-		"timestamp":    time.Now().UnixMilli(),
-	})
-}
-
-// #endregion
