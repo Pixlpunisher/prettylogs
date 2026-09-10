@@ -11,22 +11,25 @@ import (
 )
 
 type Styles struct {
-	Header     lipgloss.Style
-	Footer     lipgloss.Style
-	Border     lipgloss.Style
-	Selected   lipgloss.Style
-	Message    lipgloss.Style
-	Detail     lipgloss.Style
-	Help       lipgloss.Style
-	Error      lipgloss.Style
-	Warn       lipgloss.Style
-	Info       lipgloss.Style
-	Debug      lipgloss.Style
-	Dim        lipgloss.Style
-	SearchErr  lipgloss.Style
-	Highlight  lipgloss.Style
-	levelColor map[string]lipgloss.Style
-	spineColor map[string]color.Color
+	Header          lipgloss.Style
+	Footer          lipgloss.Style
+	Border          lipgloss.Style
+	Selected        lipgloss.Style
+	Message         lipgloss.Style
+	Detail          lipgloss.Style
+	Help            lipgloss.Style
+	Error           lipgloss.Style
+	Warn            lipgloss.Style
+	Info            lipgloss.Style
+	Debug           lipgloss.Style
+	Dim             lipgloss.Style
+	SearchErr       lipgloss.Style
+	Highlight       lipgloss.Style
+	StatusRunning   lipgloss.Style
+	StatusCompiling lipgloss.Style
+	StatusExited    lipgloss.Style
+	levelColor      map[string]lipgloss.Style
+	spineColor      map[string]color.Color
 }
 
 func NewStyles(theme config.Theme) Styles {
@@ -40,16 +43,19 @@ func NewStyles(theme config.Theme) Styles {
 			Border(lipgloss.NormalBorder(), false, false, false, true).
 			BorderForeground(themeColor(theme.Info)).
 			PaddingLeft(1),
-		Message:   lipgloss.NewStyle(),
-		Detail:    lipgloss.NewStyle().Faint(true).PaddingLeft(4),
-		Help:      lipgloss.NewStyle().Padding(1, 2),
-		Error:     lipgloss.NewStyle().Foreground(themeColor(theme.Error)).Bold(true),
-		Warn:      lipgloss.NewStyle().Foreground(themeColor(theme.Warn)).Bold(true),
-		Info:      lipgloss.NewStyle().Foreground(themeColor(theme.Info)).Bold(true),
-		Debug:     lipgloss.NewStyle().Foreground(themeColor(theme.Debug)),
-		Dim:       lipgloss.NewStyle().Faint(true),
-		SearchErr: lipgloss.NewStyle().Foreground(themeColor(theme.Error)),
-		Highlight: lipgloss.NewStyle().Reverse(true).Bold(true),
+		Message:         lipgloss.NewStyle(),
+		Detail:          lipgloss.NewStyle().Faint(true).PaddingLeft(4),
+		Help:            lipgloss.NewStyle().Padding(1, 2),
+		Error:           lipgloss.NewStyle().Foreground(themeColor(theme.Error)).Bold(true),
+		Warn:            lipgloss.NewStyle().Foreground(themeColor(theme.Warn)).Bold(true),
+		Info:            lipgloss.NewStyle().Foreground(themeColor(theme.Info)).Bold(true),
+		Debug:           lipgloss.NewStyle().Foreground(themeColor(theme.Debug)),
+		Dim:             lipgloss.NewStyle().Faint(true),
+		SearchErr:       lipgloss.NewStyle().Foreground(themeColor(theme.Error)),
+		Highlight:       lipgloss.NewStyle().Reverse(true).Bold(true),
+		StatusRunning:   lipgloss.NewStyle().Foreground(namedANSI["green"]).Bold(true),
+		StatusCompiling: lipgloss.NewStyle().Foreground(themeColor(theme.Warn)).Bold(true),
+		StatusExited:    lipgloss.NewStyle().Foreground(themeColor(theme.Error)).Bold(true),
 	}
 	if theme.Background != "" && theme.Background != "default" {
 		bg := themeColor(theme.Background)

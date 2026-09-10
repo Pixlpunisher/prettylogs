@@ -53,6 +53,12 @@ func (s *Store) Filtered() []*record.Record {
 	return out
 }
 
+func (s *Store) MaxID() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.nextID
+}
+
 func (s *Store) Len() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

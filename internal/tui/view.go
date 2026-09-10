@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -47,6 +50,9 @@ func (m Model) mainView() string {
 
 func (m Model) headerView() string {
 	counts := m.store.Counts()
+	if m.frozenCounts != nil {
+		counts = m.frozenCounts
+	}
 	filter := m.store.Query()
 	if filter == "" {
 		filter = "_______"
@@ -56,9 +62,10 @@ func (m Model) headerView() string {
 	search := fmt.Sprintf("🔍 Filter: [%s]", filter)
 	stats := fmt.Sprintf("📊 ERROR %d │ WARN %d │ INFO %d │ DEBUG %d",
 		counts[record.LevelError], counts[record.LevelWarn], counts[record.LevelInfo], counts[record.LevelDebug])
-	meta := m.styles.Dim.Render(fmt.Sprintf("%s │ %s │ %s", search, stats, m.sourceStatus))
+	badge := m.statusBadge()
+	meta := m.styles.Dim.Render(fmt.Sprintf("%s │ %s", search, stats)) + " │ " + badge
 	if level != "All" {
-		meta = m.styles.Dim.Render(fmt.Sprintf("%s │ level:%s │ %s", search, level, m.sourceStatus))
+		meta = m.styles.Dim.Render(fmt.Sprintf("%s │ level:%s", search, level)) + " │ " + badge
 	}
 	line := title + " │ " + meta
 	if m.width > 0 {
@@ -67,13 +74,28 @@ func (m Model) headerView() string {
 	return line
 }
 
+func (m Model) statusBadge() string {
+	switch m.status {
+	case statusCompiling:
+		return m.styles.StatusCompiling.Render("● Compiling..")
+	case statusExited:
+		label := "● Exited"
+		if m.exitCode != nil {
+			label = fmt.Sprintf("● Exited %d", *m.exitCode)
+		}
+		return m.styles.StatusExited.Render(label)
+	default:
+		return m.styles.StatusRunning.Render("● Running")
+	}
+}
+
 func (m Model) footerView() string {
 	n := len(m.rows())
 	pos := 0
 	if n > 0 {
 		pos = m.selected + 1
 	}
-	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  l level  │  q quit  │  color:%s", pos, n, m.colorProfile)
+	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  l level  │  q quit", pos, n)
 	if err := m.store.QueryError(); err != nil {
 		text = m.styles.SearchErr.Render(err.Error()) + "  │  " + text
 	}
@@ -243,34 +265,65 @@ func (m Model) renderDetailLines(lines []string, base lipgloss.Style) string {
 }
 
 func (m Model) detailText(rec *record.Record) string {
-	var b strings.Builder
-	raw := rec.Raw
-	first := record.FirstLine(raw)
-	rest := strings.TrimPrefix(raw, first)
+	body, extrasOK := detailBody(rec)
+	if !extrasOK {
+		return body
+	}
+	extras := formatExtra(rec.Extra)
+	if body != "" && extras != "" {
+		return body + "\n" + extras
+	}
+	if body != "" {
+		return body
+	}
+	return extras
+}
+
+func detailBody(rec *record.Record) (body string, extrasOK bool) {
+	first := record.FirstLine(rec.Raw)
+	rest := strings.TrimPrefix(rec.Raw, first)
 	rest = strings.TrimPrefix(rest, "\n")
 	if rest != "" {
-		b.WriteString(rest)
-	} else if rec.Message != record.FirstLine(rec.Message) {
-		b.WriteString(strings.TrimPrefix(rec.Message, record.FirstLine(rec.Message)+"\n"))
-	} else {
-		b.WriteString(raw)
+		return rest, true
 	}
-	if len(rec.Extra) > 0 {
-		if b.Len() > 0 {
+	if rec.Message != record.FirstLine(rec.Message) {
+		return strings.TrimPrefix(rec.Message, record.FirstLine(rec.Message)+"\n"), true
+	}
+	if pretty := prettyJSON(rec.Raw); pretty != "" && pretty != record.FirstLine(rec.Message) {
+		return pretty, false
+	}
+	return "", true
+}
+
+func formatExtra(extra map[string]string) string {
+	if len(extra) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(extra))
+	for k := range extra {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for i, k := range keys {
+		if i > 0 {
 			b.WriteString("\n")
 		}
-		keys := make([]string, 0, len(rec.Extra))
-		for k := range rec.Extra {
-			keys = append(keys, k)
-		}
-		for i, k := range keys {
-			if i > 0 {
-				b.WriteString("\n")
-			}
-			b.WriteString(fmt.Sprintf("%s: %s", k, rec.Extra[k]))
-		}
+		b.WriteString(fmt.Sprintf("%s: %s", k, extra[k]))
 	}
 	return b.String()
+}
+
+func prettyJSON(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if !json.Valid([]byte(trimmed)) {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(trimmed), "", "  "); err != nil {
+		return ""
+	}
+	return buf.String()
 }
 
 func (m Model) helpView() string {
@@ -278,7 +331,7 @@ func (m Model) helpView() string {
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(themeColor("dim")).
 		Width(max(40, min(m.width-4, 64))).
-		Render(helpText + "\nPress ? or Esc to close")
+		Render(formatHelp(m.colorProfile))
 	return box
 }
 

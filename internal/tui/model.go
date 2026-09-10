@@ -16,6 +16,16 @@ type logMsg struct {
 
 type sourceDoneMsg struct{}
 
+type listenTickMsg struct{}
+
+type procStatus string
+
+const (
+	statusCompiling procStatus = "compiling"
+	statusRunning   procStatus = "running"
+	statusExited    procStatus = "exited"
+)
+
 type Model struct {
 	store   *store.Store
 	logs    <-chan record.Record
@@ -36,37 +46,45 @@ type Model struct {
 	filterIdx   int
 	help        bool
 
-	sourceStatus string
-	follow       bool
+	status      procStatus
+	exitCode    *int
+	compileHold bool // log-detected compile; listen port must not override
+	follow      bool
 
-	colorProfile string // diagnostic: what bubbletea detected, shown in footer
+	colorProfile string // diagnostic: what bubbletea detected, shown in help
+
+	freezeID     uint64         // last record ID visible while a row is expanded; 0 = live
+	frozenCounts map[string]int // header counts pinned at expand
 }
 
-func New(st *store.Store, logs <-chan record.Record, cfg config.Config, w *wrapper.Wrapper, source string) Model {
+func New(st *store.Store, logs <-chan record.Record, cfg config.Config, w *wrapper.Wrapper) Model {
 	ti := textinput.New()
 	ti.Prompt = "/ "
 	ti.Placeholder = "regex"
 	ti.SetWidth(40)
-	status := source
-	if status == "" {
-		status = "running"
-	}
 	return Model{
-		store:        st,
-		logs:         logs,
-		wrapper:      w,
-		styles:       NewStyles(cfg.Theme),
-		expanded:     make(map[uint64]bool),
-		searchInput:  ti,
-		sourceStatus: status,
-		follow:       true,
-		width:        80,
-		height:       24,
+		store:       st,
+		logs:        logs,
+		wrapper:     w,
+		styles:      NewStyles(cfg.Theme),
+		expanded:    make(map[uint64]bool),
+		searchInput: ti,
+		status:      initialStatus(w),
+		follow:      true,
+		width:       80,
+		height:      24,
 	}
 }
 
+func initialStatus(w *wrapper.Wrapper) procStatus {
+	if w != nil {
+		return statusCompiling
+	}
+	return statusRunning
+}
+
 func (m Model) Init() tea.Cmd {
-	return waitForLog(m.logs)
+	return tea.Batch(waitForLog(m.logs), listenTickCmd(m))
 }
 
 func waitForLog(ch <-chan record.Record) tea.Cmd {

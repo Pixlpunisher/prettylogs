@@ -116,3 +116,27 @@ func (w *Wrapper) ExitCode() (int, bool) {
 		return 0, false
 	}
 }
+
+// Exited returns a Wrapper that has already finished with the given exit code.
+func Exited(code int) *Wrapper {
+	done := make(chan struct{})
+	close(done)
+	return &Wrapper{done: done, code: code, exited: true}
+}
+
+// Live returns a Wrapper that has not finished. For tests and status init.
+func Live() *Wrapper {
+	return &Wrapper{done: make(chan struct{})}
+}
+
+func (w *Wrapper) HasListeningPort() bool {
+	if w == nil || w.cmd == nil || w.cmd.Process == nil {
+		return false
+	}
+	select {
+	case <-w.done:
+		return false
+	default:
+	}
+	return groupHasListeningPort(w.cmd.Process.Pid)
+}

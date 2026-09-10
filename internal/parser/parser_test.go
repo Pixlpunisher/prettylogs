@@ -281,6 +281,231 @@ func TestSampleFilesParseAllLines(t *testing.T) {
 	}
 }
 
+func feedAll(lines ...string) []record.Record {
+	a := NewAssembler(AutoParser{})
+	var got []record.Record
+	for _, line := range lines {
+		got = append(got, a.Feed(line)...)
+	}
+	return append(got, a.Flush()...)
+}
+
+func TestAssemblerJoinsSpringFailureAnalysis(t *testing.T) {
+	t.Parallel()
+	got := feedAll(
+		"10:55:49.682 [main] ERROR org.springframework.boot.diagnostics.LoggingFailureAnalysisReporter --",
+		"***************************",
+		"APPLICATION FAILED TO START",
+		"***************************",
+		"Description:",
+		"Web server failed to start. Port 8080 was already in use.",
+	)
+	if len(got) != 1 {
+		t.Fatalf("records: got %d want 1: %+v", len(got), got)
+	}
+	if got[0].Level != record.LevelError {
+		t.Fatalf("level: got %q want ERROR", got[0].Level)
+	}
+	if !strings.Contains(got[0].Raw, "APPLICATION FAILED TO START") {
+		t.Fatalf("title missing from raw: %q", got[0].Raw)
+	}
+	if !strings.Contains(got[0].Raw, "Web server failed to start") {
+		t.Fatalf("description missing from raw: %q", got[0].Raw)
+	}
+}
+
+func TestAssemblerKeepsTwoErrorHeadersSeparate(t *testing.T) {
+	t.Parallel()
+	got := feedAll("ERROR: first failed", "ERROR: second failed")
+	if len(got) != 2 {
+		t.Fatalf("records: got %d want 2: %+v", len(got), got)
+	}
+	if !strings.Contains(got[0].Message, "first failed") {
+		t.Fatalf("first message: %q", got[0].Message)
+	}
+	if !strings.Contains(got[1].Message, "second failed") {
+		t.Fatalf("second message: %q", got[1].Message)
+	}
+	if strings.Contains(got[0].Raw, "second failed") {
+		t.Fatalf("second error was merged into the first: %q", got[0].Raw)
+	}
+}
+
+func TestAssemblerStartsNewErrorOnLogHeader(t *testing.T) {
+	t.Parallel()
+	got := feedAll(
+		"ERROR: reporter --",
+		"***************************",
+		"APPLICATION FAILED TO START",
+		"10:55:50.001 [main] ERROR o.s.boot.SpringApplication -- Application run failed",
+	)
+	if len(got) != 2 {
+		t.Fatalf("records: got %d want 2: %+v", len(got), got)
+	}
+	if got[0].Level != record.LevelError || got[1].Level != record.LevelError {
+		t.Fatalf("levels: %q %q", got[0].Level, got[1].Level)
+	}
+	if !strings.Contains(got[0].Raw, "APPLICATION FAILED TO START") {
+		t.Fatalf("banner should stay on the first error: %q", got[0].Raw)
+	}
+	if !strings.Contains(got[1].Message, "Application run failed") && !strings.Contains(got[1].Raw, "Application run failed") {
+		t.Fatalf("second header should be its own record: %q", got[1].Raw)
+	}
+}
+
+func TestAssemblerJoinsSeparatorOntoInfo(t *testing.T) {
+	t.Parallel()
+	got := feedAll("INFO: starting", "==========")
+	if len(got) != 1 {
+		t.Fatalf("records: got %d want 1: %+v", len(got), got)
+	}
+	if got[0].Level != record.LevelInfo {
+		t.Fatalf("level: got %q want INFO", got[0].Level)
+	}
+	if !strings.Contains(got[0].Raw, "==========") {
+		t.Fatalf("separator not attached: %q", got[0].Raw)
+	}
+}
+
+func TestCompilePhase(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		line      string
+		wantStart bool
+		wantEnd   bool
+	}{
+		{line: "Compiling...", wantStart: true},
+		{line: "Starting compilation", wantStart: true},
+		{line: "rebuild started", wantStart: true},
+		{line: "Compiled successfully in 4.2s", wantEnd: true},
+		{line: "event - compiled client and server successfully in 2.3s", wantEnd: true},
+		{line: "ready - started server on 0.0.0.0:3000", wantEnd: true},
+		{line: "listening on :8080", wantEnd: true},
+		{line: "  ➜  Local: http://localhost:5173/", wantEnd: true},
+		{line: "INFO: hello", wantStart: false, wantEnd: false},
+	}
+	for _, tc := range cases {
+		start, end := CompilePhase(tc.line)
+		if start != tc.wantStart || end != tc.wantEnd {
+			t.Fatalf("%q: start=%v end=%v want start=%v end=%v", tc.line, start, end, tc.wantStart, tc.wantEnd)
+		}
+	}
+}
+
+func TestAssemblerJoinsMavenReactorNoiseOntoError(t *testing.T) {
+	t.Parallel()
+	got := feedAll(
+		"12:53:25.623 [main] ERROR org.springframework.boot.diagnostics.LoggingFailureAnalysisReporter --",
+		"[INFO] ------------------------------------------------------------------------",
+		"BUILD FAILURE",
+		"[INFO] Total time:  24.533 s",
+		"[INFO] Finished at: 2026-09-10T12:53:25+02:00",
+	)
+	if len(got) != 1 {
+		t.Fatalf("records: got %d want 1: %+v", len(got), got)
+	}
+	if got[0].Level != record.LevelError {
+		t.Fatalf("level: got %q want ERROR", got[0].Level)
+	}
+	if !strings.Contains(got[0].Raw, "BUILD FAILURE") {
+		t.Fatalf("BUILD FAILURE missing from raw: %q", got[0].Raw)
+	}
+}
+
+func TestAssemblerKeepsMavenGoalErrorSeparate(t *testing.T) {
+	t.Parallel()
+	got := feedAll(
+		"12:53:25.623 [main] ERROR org.springframework.boot.diagnostics.LoggingFailureAnalysisReporter --",
+		"[INFO] ------------------------------------------------------------------------",
+		"BUILD FAILURE",
+		"[INFO] Total time:  24.533 s",
+		"[INFO] Finished at: 2026-09-10T12:53:25+02:00",
+		"[ERROR] Failed to execute goal org.springframework.boot:spring-boot-maven-plugin:3.5.16:run (default-cli) on project teaching-aid-service-api: Process terminated with exit code: 1 -> [Help 1]",
+	)
+	if len(got) != 2 {
+		t.Fatalf("records: got %d want 2: %+v", len(got), got)
+	}
+	if strings.Contains(got[0].Raw, "Failed to execute goal") {
+		t.Fatalf("goal error was merged into the Spring record: %q", got[0].Raw)
+	}
+	if !strings.Contains(got[1].Raw, "Failed to execute goal") {
+		t.Fatalf("goal error missing from second record: %q", got[1].Raw)
+	}
+}
+
+func TestAssemblerJoinsMavenHelpOntoGoalError(t *testing.T) {
+	t.Parallel()
+	got := feedAll(
+		"12:53:25.623 [main] ERROR org.springframework.boot.diagnostics.LoggingFailureAnalysisReporter --",
+		"[INFO] ------------------------------------------------------------------------",
+		"BUILD FAILURE",
+		"[ERROR] Failed to execute goal org.springframework.boot:spring-boot-maven-plugin:3.5.16:run (default-cli) on project teaching-aid-service-api: Process terminated with exit code: 1 -> [Help 1]",
+		"[ERROR]",
+		"[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.",
+		"[ERROR] Re-run Maven using the -X switch to enable full debug logging.",
+		"[ERROR] For more information about the errors and possible solutions, please read the following articles:",
+		"[Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoExecutionException",
+	)
+	if len(got) != 2 {
+		t.Fatalf("records: got %d want 2: %+v", len(got), got)
+	}
+	if !strings.Contains(got[1].Raw, "To see the full stack trace") {
+		t.Fatalf("help text should be on the goal record: %q", got[1].Raw)
+	}
+	if !strings.Contains(got[1].Raw, "[Help 1]") {
+		t.Fatalf("Help 1 should be on the goal record: %q", got[1].Raw)
+	}
+}
+
+func TestAssemblerSplitsNxEpilogueFromMavenError(t *testing.T) {
+	t.Parallel()
+	got := feedAll(
+		"12:53:25.623 [main] ERROR org.springframework.boot.diagnostics.LoggingFailureAnalysisReporter --",
+		"[INFO] ------------------------------------------------------------------------",
+		"BUILD FAILURE",
+		"[ERROR] Failed to execute goal org.springframework.boot:spring-boot-maven-plugin:3.5.16:run (default-cli) on project teaching-aid-service-api: Process terminated with exit code: 1 -> [Help 1]",
+		"[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.",
+		"[Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoExecutionException",
+		" NX   Running target serve-with-local-config for project teaching-aid-service-api and 2 tasks it depends on failed",
+		"Failed tasks:",
+		"- teaching-aid-service-api:serve-with-local-config",
+	)
+	if len(got) != 3 {
+		t.Fatalf("records: got %d want 3: %+v", len(got), got)
+	}
+	if got[2].Level != record.LevelError {
+		t.Fatalf("nx record level: got %q want ERROR", got[2].Level)
+	}
+	if strings.Contains(got[1].Raw, "NX") {
+		t.Fatalf("nx epilogue was glued onto the goal record: %q", got[1].Raw)
+	}
+	if !strings.Contains(got[2].Raw, "Running target") {
+		t.Fatalf("nx banner missing from third record: %q", got[2].Raw)
+	}
+	if !strings.Contains(got[2].Raw, "Failed tasks:") {
+		t.Fatalf("Failed tasks should stay on the nx record: %q", got[2].Raw)
+	}
+}
+
+func TestAssemblerDoesNotTreatMavenHelpURLAsNx(t *testing.T) {
+	t.Parallel()
+	got := feedAll(
+		"[ERROR] Failed to execute goal org.springframework.boot:spring-boot-maven-plugin:3.5.16:run (default-cli) on project teaching-aid-service-api: Process terminated with exit code: 1 -> [Help 1]",
+		"[Help 1] http://example.com/NX-something",
+		"Failed tasks:",
+		"- teaching-aid-service-api:serve-with-local-config",
+	)
+	if len(got) != 2 {
+		t.Fatalf("records: got %d want 2: %+v", len(got), got)
+	}
+	if strings.Contains(got[0].Raw, "Failed tasks:") {
+		t.Fatalf("Failed tasks was glued onto the Maven help record: %q", got[0].Raw)
+	}
+	if !strings.Contains(got[1].Raw, "Failed tasks:") {
+		t.Fatalf("Failed tasks should start its own record: %q", got[1].Raw)
+	}
+}
+
 func TestJSONParserRejectsNonJSON(t *testing.T) {
 	t.Parallel()
 	if _, ok := (JSONParser{}).Parse("ERROR: not json"); ok {

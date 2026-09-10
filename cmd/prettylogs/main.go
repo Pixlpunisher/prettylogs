@@ -50,10 +50,8 @@ func run() error {
 
 	logCh := make(chan record.Record, 256)
 	var w *wrapper.Wrapper
-	source := "running"
 
 	if useStdin {
-		source = "stdin"
 		go func() {
 			wrapper.StreamReader(os.Stdin, p, logCh)
 			close(logCh)
@@ -69,7 +67,7 @@ func run() error {
 		}()
 	}
 
-	model := tui.New(store.New(store.DefaultMaxSize), logCh, cfg, w, source)
+	model := tui.New(store.New(store.DefaultMaxSize), logCh, cfg, w)
 	prog := tea.NewProgram(model)
 	if _, err := prog.Run(); err != nil {
 		if w != nil {

@@ -94,5 +94,18 @@ func buildRows(entries []*record.Record, threshold int) []row {
 // rows returns the current renderable rows, folding long same-level runs
 // into groups. Used everywhere instead of m.store.Filtered() for indexing.
 func (m Model) rows() []row {
-	return buildRows(m.store.Filtered(), groupThreshold)
+	entries := m.store.Filtered()
+	if m.freezeID != 0 {
+		// Snapshot at expand time. Later records stay hidden until collapse.
+		// A same-level INFO arriving while expanded is excluded, so grouping
+		// can split a run that would otherwise fold.
+		kept := make([]*record.Record, 0, len(entries))
+		for _, e := range entries {
+			if e.ID <= m.freezeID {
+				kept = append(kept, e)
+			}
+		}
+		entries = kept
+	}
+	return buildRows(entries, groupThreshold)
 }

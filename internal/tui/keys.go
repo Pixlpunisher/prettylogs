@@ -23,4 +23,11 @@ General
   Esc        Close dialog / help
 `
 
+func formatHelp(colorProfile string) string {
+	if colorProfile == "" {
+		colorProfile = "unknown"
+	}
+	return helpText + "Color profile: " + colorProfile + "\n\nPress ? or Esc to close"
+}
+
 var levelOptions = []string{"All", "ERROR", "WARN", "INFO", "DEBUG"}

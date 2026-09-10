@@ -1,6 +1,8 @@
 package wrapper
 
 import (
+	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +53,28 @@ func TestStartCommandCapturesStdout(t *testing.T) {
 	code, ok := w.ExitCode()
 	if !ok || code != 0 {
 		t.Fatalf("exit %d ok=%v", code, ok)
+	}
+}
+
+func TestHasListeningPortFalseWhenExited(t *testing.T) {
+	t.Parallel()
+	if Exited(1).HasListeningPort() {
+		t.Fatal("exited wrapper should not report a listening port")
+	}
+	if Live().HasListeningPort() {
+		t.Fatal("wrapper with no process should not report a listening port")
+	}
+}
+
+func TestPidHasListeningPort(t *testing.T) {
+	t.Parallel()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	if !pidHasListeningPort(os.Getpid()) {
+		t.Fatal("expected this process to report a listening TCP port")
 	}
 }
 
