@@ -450,6 +450,17 @@ func TestFooterOmitsColorProfile(t *testing.T) {
 	}
 }
 
+func TestFooterShowsCopyHints(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	content := ansi.Strip(m.View().Content)
+	for _, want := range []string{"y pretty copy", "Y raw copy"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("footer missing %q:\n%s", want, content)
+		}
+	}
+}
+
 func TestHelpShowsColorProfile(t *testing.T) {
 	t.Parallel()
 	m := newTestModel()

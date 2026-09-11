@@ -12,6 +12,9 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	if cfg.Theme.Error != "red" || cfg.Theme.Warn != "yellow" {
 		t.Fatalf("defaults %+v", cfg.Theme)
 	}
+	if cfg.Theme.Name != "Default" {
+		t.Fatalf("default name %q", cfg.Theme.Name)
+	}
 }
 
 func TestLoadReadsTheme(t *testing.T) {
@@ -31,5 +34,29 @@ func TestLoadReadsTheme(t *testing.T) {
 	}
 	if cfg.Theme.Info != "blue" {
 		t.Fatalf("info should keep default, got %q", cfg.Theme.Info)
+	}
+}
+
+func TestSaveLoadRoundTrip(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config")
+	in := Config{Theme: Theme{
+		Name:       "Nord",
+		Error:      "#bf616a",
+		Warn:       "#ebcb8b",
+		Info:       "#88c0d0",
+		Debug:      "#4c566a",
+		Background: "default",
+		Border:     "dim",
+	}}
+	if err := Save(path, in); err != nil {
+		t.Fatal(err)
+	}
+	got := Load(path)
+	if got.Theme.Name != "Nord" {
+		t.Fatalf("name %q", got.Theme.Name)
+	}
+	if got.Theme.Error != "#bf616a" || got.Theme.Info != "#88c0d0" {
+		t.Fatalf("colors %+v", got.Theme)
 	}
 }

@@ -51,6 +51,9 @@ type Model struct {
 	filtering   bool
 	filterIdx   int
 	help        bool
+	theming     bool
+	themeIdx    int
+	themeName   string
 
 	status      procStatus
 	exitCode    *int
@@ -72,6 +75,10 @@ func New(st *store.Store, logs <-chan record.Record, cfg config.Config, w *wrapp
 	ti.Prompt = "/ "
 	ti.Placeholder = "regex"
 	ti.SetWidth(40)
+	name := cfg.Theme.Name
+	if name == "" {
+		name = config.Default().Theme.Name
+	}
 	return Model{
 		store:       st,
 		logs:        logs,
@@ -81,6 +88,8 @@ func New(st *store.Store, logs <-chan record.Record, cfg config.Config, w *wrapp
 		searchInput: ti,
 		status:      initialStatus(w),
 		follow:      true,
+		themeName:   name,
+		themeIdx:    themeIndexByName(name),
 		width:       80,
 		height:      24,
 	}

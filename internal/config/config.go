@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 
@@ -8,6 +9,7 @@ import (
 )
 
 type Theme struct {
+	Name       string `mapstructure:"name"`
 	Error      string `mapstructure:"error"`
 	Warn       string `mapstructure:"warn"`
 	Info       string `mapstructure:"info"`
@@ -23,6 +25,7 @@ type Config struct {
 func Default() Config {
 	return Config{
 		Theme: Theme{
+			Name:       "Default",
 			Error:      "red",
 			Warn:       "yellow",
 			Info:       "blue",
@@ -31,6 +34,14 @@ func Default() Config {
 			Border:     "dim",
 		},
 	}
+}
+
+func DefaultPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".prettyLogs", "config"), nil
 }
 
 func Load(explicit string) Config {
@@ -76,4 +87,36 @@ func applyDefaults(cfg Config) Config {
 		cfg.Theme.Border = def.Border
 	}
 	return cfg
+}
+
+// Save writes a theme-only YAML file. Empty path uses DefaultPath().
+func Save(path string, cfg Config) error {
+	if path == "" {
+		var err error
+		path, err = DefaultPath()
+		if err != nil {
+			return err
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	t := applyDefaults(cfg).Theme
+	if t.Name == "" {
+		t.Name = Default().Theme.Name
+	}
+	body := "theme:\n" +
+		"  name: " + yamlQuote(t.Name) + "\n" +
+		"  error: " + yamlQuote(t.Error) + "\n" +
+		"  warn: " + yamlQuote(t.Warn) + "\n" +
+		"  info: " + yamlQuote(t.Info) + "\n" +
+		"  debug: " + yamlQuote(t.Debug) + "\n" +
+		"  background: " + yamlQuote(t.Background) + "\n" +
+		"  border: " + yamlQuote(t.Border) + "\n"
+	return os.WriteFile(path, []byte(body), 0o600)
+}
+
+func yamlQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

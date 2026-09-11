@@ -22,6 +22,7 @@ Interaction
   ?         Show this help
 
 General
+  t          Choose theme (from help)
   q / ctrl+c Quit
   Esc        Close dialog / help
 `

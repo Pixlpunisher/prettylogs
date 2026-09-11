@@ -16,7 +16,9 @@ import (
 
 func (m Model) View() tea.View {
 	var body string
-	if m.help {
+	if m.theming {
+		body = m.themeView()
+	} else if m.help {
 		body = m.helpView()
 	} else {
 		body = m.mainView()
@@ -98,7 +100,7 @@ func (m Model) footerView() string {
 	if n > 0 {
 		pos = m.selected + 1
 	}
-	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  l level  │  r restart │  q quit", pos, n)
+	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  y pretty copy  │  Y raw copy  │  l level  │  r restart │  q quit", pos, n)
 	if m.copyStatus != "" {
 		text = m.copyStatus + "  │  " + text
 	}
@@ -338,6 +340,35 @@ func (m Model) helpView() string {
 		BorderForeground(themeColor("dim")).
 		Width(max(40, min(m.width-4, 64))).
 		Render(formatHelp(m.colorProfile))
+	return box
+}
+
+func (m Model) themeView() string {
+	presets := themePresets()
+	var b strings.Builder
+	b.WriteString(m.styles.Header.Render("Choose theme"))
+	b.WriteString("\n")
+	for i, p := range presets {
+		cursor := "  "
+		if i == m.themeIdx {
+			cursor = "> "
+		}
+		line := cursor + p.Name
+		if i == m.themeIdx {
+			line = m.styles.Selected.Render(line)
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(themePreviewLine(presets[m.themeIdx].Theme))
+	b.WriteString("\n")
+	b.WriteString(m.styles.Dim.Render("Enter to apply, Esc to cancel"))
+	box := m.styles.Help.
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(themeColor("dim")).
+		Width(max(40, min(m.width-4, 64))).
+		Render(strings.TrimRight(b.String(), "\n"))
 	return box
 }
 

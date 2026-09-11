@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/tcontardo/prettylogs/internal/config"
 	"github.com/tcontardo/prettylogs/internal/parser"
 )
 
@@ -81,6 +82,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	if m.theming {
+		return m.handleThemeKey(key)
+	}
 	if m.help {
 		return m.handleHelpKey(key)
 	}
@@ -141,11 +145,48 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleHelpKey(key string) (tea.Model, tea.Cmd) {
-	if key == "?" || key == "esc" || key == "q" {
+	switch key {
+	case "t":
+		m.theming = true
+		m.themeIdx = themeIndexByName(m.themeName)
+		return m, nil
+	case "?", "esc":
 		m.help = false
-		if key == "q" && !m.searching {
+	case "q":
+		m.help = false
+		if !m.searching {
 			return m.quit()
 		}
+	}
+	return m, nil
+}
+
+func (m Model) handleThemeKey(key string) (tea.Model, tea.Cmd) {
+	presets := themePresets()
+	switch key {
+	case "j", "down":
+		if m.themeIdx < len(presets)-1 {
+			m.themeIdx++
+		}
+	case "k", "up":
+		if m.themeIdx > 0 {
+			m.themeIdx--
+		}
+	case "enter":
+		p := presets[m.themeIdx]
+		m.styles = NewStyles(p.Theme)
+		m.themeName = p.Name
+		m.theming = false
+		m.help = false
+		if err := persistTheme(config.Config{Theme: p.Theme}); err != nil {
+			m.copyStatus = "theme save failed: " + err.Error()
+		}
+		return m, nil
+	case "esc":
+		m.theming = false
+		return m, nil
+	case "q", "ctrl+c":
+		return m.quit()
 	}
 	return m, nil
 }
