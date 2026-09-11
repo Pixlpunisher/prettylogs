@@ -10,6 +10,13 @@ import (
 	"github.com/tcontardo/prettylogs/internal/record"
 )
 
+const (
+	libraryRunMin       = 3
+	prettyBodyMaxLines  = 40
+	prettyBodyHeadLines = 15
+	prettyBodyTailLines = 8
+)
+
 // writeClipboard is clipboard.WriteAll in production; tests replace it so we
 // never need a real pasteboard.
 var writeClipboard = clipboard.WriteAll
@@ -52,14 +59,32 @@ func copyRecords(r row) []*record.Record {
 	}
 }
 
-func formatPretty(recs []*record.Record) string {
-	if len(recs) == 1 {
-		return formatPrettyOne(recs[0])
-	}
-	return formatPrettyGroup(recs)
+type prettyStats struct {
+	kept  int
+	total int
 }
 
-func formatPrettyOne(rec *record.Record) string {
+func (s prettyStats) omitted() bool {
+	return s.total > s.kept
+}
+
+func addPrettyStats(a, b prettyStats) prettyStats {
+	return prettyStats{kept: a.kept + b.kept, total: a.total + b.total}
+}
+
+func formatPretty(recs []*record.Record) string {
+	text, _ := formatPrettyWithStats(recs)
+	return text
+}
+
+func formatPrettyWithStats(recs []*record.Record) (string, prettyStats) {
+	if len(recs) == 1 {
+		return formatPrettyOneStats(recs[0])
+	}
+	return formatPrettyGroup(recs), prettyStats{}
+}
+
+func formatPrettyOneStats(rec *record.Record) (string, prettyStats) {
 	// Header is "LEVEL[  time][  source]" — omit empty fields rather than
 	// printing the TUI's "—" placeholders, which are noise in a Slack paste.
 	parts := []string{rec.Level}
@@ -69,26 +94,150 @@ func formatPrettyOne(rec *record.Record) string {
 	if rec.Source != "" {
 		parts = append(parts, rec.Source)
 	}
+
+	body, stats := collapsePrettyBody(rec.Message)
+	extras, extraStats := formatPrettyExtras(rec.Message, rec.Extra)
+	stats = addPrettyStats(stats, extraStats)
+
 	var b strings.Builder
 	b.WriteString(strings.Join(parts, "  "))
-	b.WriteByte('\n')
-	// Full message, not FirstLine: stack traces are why you copy an ERROR.
-	b.WriteString(rec.Message)
-	if len(rec.Extra) > 0 {
-		keys := make([]string, 0, len(rec.Extra))
-		for k := range rec.Extra {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys) // map iteration order is random; sorted extras are testable and readable
+	if body != "" {
 		b.WriteByte('\n')
-		for i, k := range keys {
-			if i > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString(fmt.Sprintf("%s: %s", k, rec.Extra[k]))
+		b.WriteString(body)
+	}
+	if extras != "" {
+		b.WriteString("\n\n")
+		b.WriteString(extras)
+	}
+	return b.String(), stats
+}
+
+func formatPrettyExtras(message string, extra map[string]string) (string, prettyStats) {
+	if len(extra) == 0 {
+		return "", prettyStats{}
+	}
+	keys := make([]string, 0, len(extra))
+	for k, v := range extra {
+		if isStackExtraKey(k) && v != "" && strings.Contains(message, v) {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return "", prettyStats{}
+	}
+	var b strings.Builder
+	var stats prettyStats
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		v := extra[k]
+		if strings.Contains(v, "\n") {
+			collapsed, st := collapsePrettyBody(v)
+			stats = addPrettyStats(stats, st)
+			b.WriteString(k)
+			b.WriteString(":\n")
+			b.WriteString(collapsed)
+			continue
+		}
+		b.WriteString(fmt.Sprintf("%s: %s", k, v))
+		stats.kept++
+		stats.total++
+	}
+	return b.String(), stats
+}
+
+func isStackExtraKey(k string) bool {
+	switch strings.ToLower(k) {
+	case "stack", "err", "error", "exception", "stacktrace", "stack_trace":
+		return true
+	default:
+		return false
+	}
+}
+
+func collapsePrettyBody(text string) (string, prettyStats) {
+	if text == "" {
+		return "", prettyStats{}
+	}
+	lines := strings.Split(text, "\n")
+	total := len(lines)
+	lines = collapseLibraryRuns(lines)
+	lines = collapseHeadTail(lines)
+	return strings.Join(lines, "\n"), prettyStats{kept: len(lines), total: total}
+}
+
+func collapseLibraryRuns(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	var run []string
+	flush := func() {
+		if len(run) >= libraryRunMin {
+			out = append(out, fmt.Sprintf("    … %d library frames omitted …", len(run)))
+		} else {
+			out = append(out, run...)
+		}
+		run = run[:0]
+	}
+	for _, line := range lines {
+		if isStackFrame(line) && isLibraryFrame(line) {
+			run = append(run, line)
+			continue
+		}
+		flush()
+		out = append(out, line)
+	}
+	flush()
+	return out
+}
+
+func collapseHeadTail(lines []string) []string {
+	if len(lines) <= prettyBodyMaxLines {
+		return lines
+	}
+	omitted := len(lines) - prettyBodyHeadLines - prettyBodyTailLines
+	out := make([]string, 0, prettyBodyHeadLines+prettyBodyTailLines+1)
+	out = append(out, lines[:prettyBodyHeadLines]...)
+	out = append(out, fmt.Sprintf("… %d lines omitted …", omitted))
+	out = append(out, lines[len(lines)-prettyBodyTailLines:]...)
+	return out
+}
+
+func isStackFrame(line string) bool {
+	t := strings.TrimSpace(line)
+	switch {
+	case strings.HasPrefix(t, "at "):
+		return true
+	case strings.HasPrefix(t, `File "`):
+		return true
+	case strings.HasPrefix(t, "...") && strings.Contains(t, "more"):
+		return true
+	default:
+		return false
+	}
+}
+
+func isLibraryFrame(line string) bool {
+	for _, marker := range libraryFrameMarkers {
+		if strings.Contains(line, marker) {
+			return true
 		}
 	}
-	return b.String()
+	return false
+}
+
+var libraryFrameMarkers = []string{
+	"node_modules",
+	"node:",
+	"site-packages",
+	"org.springframework",
+	"org.apache.",
+	"java.base",
+	"jdk.internal",
+	"sun.",
+	"net.sf.cglib",
+	"io.undertow",
 }
 
 func formatPrettyGroup(recs []*record.Record) string {
@@ -146,7 +295,14 @@ func (m *Model) copySelection(raw bool) {
 		m.copyStatus = "nothing to copy"
 		return
 	}
-	if err := writeClipboard(formatCopy(r, raw)); err != nil {
+	var text string
+	var stats prettyStats
+	if raw {
+		text = formatCopy(r, true)
+	} else {
+		text, stats = formatPrettyWithStats(recs)
+	}
+	if err := writeClipboard(text); err != nil {
 		m.copyStatus = "copy failed: " + err.Error()
 		return
 	}
@@ -156,6 +312,10 @@ func (m *Model) copySelection(raw bool) {
 	}
 	if raw {
 		m.copyStatus = fmt.Sprintf("copied %d %s (raw)", len(recs), noun)
+		return
+	}
+	if len(recs) == 1 && stats.omitted() {
+		m.copyStatus = fmt.Sprintf("copied 1 record (%d of %d lines)", stats.kept, stats.total)
 		return
 	}
 	m.copyStatus = fmt.Sprintf("copied %d %s", len(recs), noun)

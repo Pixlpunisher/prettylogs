@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +69,7 @@ func TestFormatCopyExtrasSorted(t *testing.T) {
 			"requestId": "abc-123",
 		},
 	}}
-	want := "ERROR  10:23:45  auth.service.ts:124\nDatabase connection failed\nrequestId: abc-123\nuserId: 42"
+	want := "ERROR  10:23:45  auth.service.ts:124\nDatabase connection failed\n\nrequestId: abc-123\nuserId: 42"
 	if got := formatCopy(r, false); got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -79,6 +80,111 @@ func TestFormatCopyMultilineMessage(t *testing.T) {
 	r := row{kind: rowRecord, rec: &record.Record{
 		Level:   record.LevelError,
 		Message: "boom\n  at foo.ts:1",
+	}}
+	want := "ERROR\nboom\n  at foo.ts:1"
+	if got := formatCopy(r, false); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestFormatCopyShortProjectStack(t *testing.T) {
+	t.Parallel()
+	r := row{kind: rowRecord, rec: &record.Record{
+		Level:   record.LevelError,
+		Message: "boom\n  at foo.ts:1\n  at bar.ts:2\n  at baz.ts:3",
+	}}
+	want := "ERROR\nboom\n  at foo.ts:1\n  at bar.ts:2\n  at baz.ts:3"
+	if got := formatCopy(r, false); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestFormatCopyCollapsesLibraryFrameRuns(t *testing.T) {
+	t.Parallel()
+	r := row{kind: rowRecord, rec: &record.Record{
+		Level: record.LevelError,
+		Message: strings.Join([]string{
+			"NullPointerException: boom",
+			"	at com.example.api.ApiApplication.main(ApiApplication.java:18)",
+			"	at org.springframework.boot.SpringApplication.run(SpringApplication.java:1)",
+			"	at org.springframework.boot.SpringApplication.run(SpringApplication.java:2)",
+			"	at org.springframework.boot.SpringApplication.run(SpringApplication.java:3)",
+			"	at org.springframework.boot.SpringApplication.run(SpringApplication.java:4)",
+			"Caused by: java.net.BindException: Address already in use",
+			"	at org.apache.tomcat.util.net.NioEndpoint.bind(NioEndpoint.java:1)",
+			"	at org.apache.tomcat.util.net.NioEndpoint.bind(NioEndpoint.java:2)",
+			"	at org.apache.tomcat.util.net.NioEndpoint.bind(NioEndpoint.java:3)",
+		}, "\n"),
+	}}
+	want := strings.Join([]string{
+		"ERROR",
+		"NullPointerException: boom",
+		"	at com.example.api.ApiApplication.main(ApiApplication.java:18)",
+		"    … 4 library frames omitted …",
+		"Caused by: java.net.BindException: Address already in use",
+		"    … 3 library frames omitted …",
+	}, "\n")
+	if got := formatCopy(r, false); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestFormatCopyHeadTailNonFrameWall(t *testing.T) {
+	t.Parallel()
+	n := prettyBodyMaxLines + 10
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%d", i)
+	}
+	r := row{kind: rowRecord, rec: &record.Record{
+		Level:   record.LevelError,
+		Message: strings.Join(lines, "\n"),
+	}}
+	omitted := n - prettyBodyHeadLines - prettyBodyTailLines
+	wantLines := append([]string{"ERROR"}, lines[:prettyBodyHeadLines]...)
+	wantLines = append(wantLines, fmt.Sprintf("… %d lines omitted …", omitted))
+	wantLines = append(wantLines, lines[n-prettyBodyTailLines:]...)
+	want := strings.Join(wantLines, "\n")
+	if got := formatCopy(r, false); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestFormatCopyMultilineStackExtra(t *testing.T) {
+	t.Parallel()
+	stack := strings.Join([]string{
+		"Error: boom",
+		"    at Pool.connect (/src/db/pool.ts:45)",
+		"    at node_modules/pg/lib/client.js:1",
+		"    at node_modules/pg/lib/client.js:2",
+		"    at node_modules/pg/lib/client.js:3",
+	}, "\n")
+	r := row{kind: rowRecord, rec: &record.Record{
+		Level:   record.LevelError,
+		Message: "Database connection failed",
+		Extra:   map[string]string{"stack": stack},
+	}}
+	want := strings.Join([]string{
+		"ERROR",
+		"Database connection failed",
+		"",
+		"stack:",
+		"Error: boom",
+		"    at Pool.connect (/src/db/pool.ts:45)",
+		"    … 3 library frames omitted …",
+	}, "\n")
+	if got := formatCopy(r, false); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestFormatCopySkipsDuplicateStackExtra(t *testing.T) {
+	t.Parallel()
+	msg := "boom\n  at foo.ts:1"
+	r := row{kind: rowRecord, rec: &record.Record{
+		Level:   record.LevelError,
+		Message: msg,
+		Extra:   map[string]string{"stack": msg},
 	}}
 	want := "ERROR\nboom\n  at foo.ts:1"
 	if got := formatCopy(r, false); got != want {
@@ -167,6 +273,36 @@ func TestCopySelectionPrettyAndRaw(t *testing.T) {
 	}
 	if *got != raw {
 		t.Fatalf("clipboard raw: got %q want %q", *got, raw)
+	}
+}
+
+func TestCopySelectionFooterCountsOmittedLines(t *testing.T) {
+	stubClipboard(t)
+	n := prettyBodyMaxLines + 10
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%d", i)
+	}
+	m := newTestModel(record.Record{
+		Level:   record.LevelError,
+		Message: strings.Join(lines, "\n"),
+		Raw:     "raw",
+	})
+	updated, _ := m.handleKey(keyMsg("y"))
+	m = updated.(Model)
+	kept := prettyBodyHeadLines + 1 + prettyBodyTailLines
+	want := fmt.Sprintf("copied 1 record (%d of %d lines)", kept, n)
+	if m.copyStatus != want {
+		t.Fatalf("status: got %q want %q", m.copyStatus, want)
+	}
+	if !strings.Contains(m.footerView(), want) {
+		t.Fatalf("footer missing copy status:\n%s", m.footerView())
+	}
+
+	updated, _ = m.handleKey(keyMsg("Y"))
+	m = updated.(Model)
+	if m.copyStatus != "copied 1 record (raw)" {
+		t.Fatalf("raw should not show line counts, got %q", m.copyStatus)
 	}
 }
 
