@@ -1,0 +1,44 @@
+name: Update Homebrew tap
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag and commit
+        id: vars
+        run: |
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: Pixlpunisher/homebrew-prettylogs
+          token: ${{ secrets.TAP_REPO_TOKEN }}
+          path: tap
+
+      - name: Bump formula
+        run: |
+          cd tap
+          sed -i \
+            -e "s/tag:      \".*\"/tag:      \"${{ steps.vars.outputs.tag }}\"/" \
+            -e "s/revision: \".*\"/revision: \"${{ steps.vars.outputs.sha }}\"/" \
+            Formula/prettylogs.rb
+          cat Formula/prettylogs.rb
+
+      - name: Commit and push
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -am "Bump prettylogs to ${{ steps.vars.outputs.tag }}"
+          git push
