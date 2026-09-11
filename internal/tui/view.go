@@ -10,42 +10,98 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tcontardo/prettylogs/internal/record"
 )
 
+// wordmark is the one-line header/help title (wood emoji + unicode small caps).
+const wordmark = "🪵 ᴘʀᴇᴛᴛʏʟᴏɢꜱ"
+
 func (m Model) View() tea.View {
-	var body string
-	if m.help {
-		body = m.helpView()
-	} else {
-		body = m.mainView()
+	body := m.mainView()
+	// Help and the theme picker are modals: the log list stays on screen
+	// behind them rather than being replaced by a separate page.
+	if m.theming {
+		body = overlayCentered(body, m.themeView(), m.width, m.height)
+	} else if m.help {
+		body = overlayCentered(body, m.helpView(), m.width, m.height)
 	}
 	v := tea.NewView(body)
 	v.AltScreen = true
 	return v
 }
 
-func (m Model) mainView() string {
-	var b strings.Builder
-	b.WriteString(m.headerView())
-	b.WriteString("\n")
-	if m.filtering {
-		b.WriteString(m.filterView())
-		b.WriteString("\n")
+// overlayCentered draws box on top of base, centered, leaving the rest of
+// base visible. Lines are spliced by display width so ANSI styling in either
+// layer is preserved.
+func overlayCentered(base, box string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return box
 	}
-	b.WriteString(m.listView())
-	if m.searching {
-		b.WriteString("\n")
-		b.WriteString(m.searchInput.View())
-		if err := m.store.QueryError(); err != nil {
-			b.WriteString("  ")
-			b.WriteString(m.styles.SearchErr.Render(err.Error()))
+	baseLines := strings.Split(base, "\n")
+	boxLines := strings.Split(box, "\n")
+	boxW, boxH := lipgloss.Width(box), len(boxLines)
+	top := max(0, (height-boxH)/2)
+	left := max(0, (width-boxW)/2)
+
+	for i, boxLine := range boxLines {
+		y := top + i
+		if y >= len(baseLines) {
+			break
 		}
+		baseLines[y] = spliceLine(baseLines[y], boxLine, left, width)
 	}
-	b.WriteString("\n")
-	b.WriteString(m.footerView())
-	return b.String()
+	return strings.Join(baseLines, "\n")
+}
+
+// spliceLine replaces the run of cells [at, at+width(overlay)) in base with
+// overlay, padding base with spaces when it is shorter than the insert point.
+func spliceLine(base, overlay string, at, width int) string {
+	prefix := ansi.Truncate(base, at, "")
+	if pad := at - lipgloss.Width(prefix); pad > 0 {
+		prefix += strings.Repeat(" ", pad)
+	}
+	tailStart := at + lipgloss.Width(overlay)
+	suffix := ""
+	if lipgloss.Width(base) > tailStart {
+		suffix = ansi.TruncateLeft(base, tailStart, "")
+	}
+	line := prefix + overlay + suffix
+	if lipgloss.Width(line) > width {
+		line = ansi.Truncate(line, width, "")
+	}
+	return line
+}
+
+// mainView stacks header, list and footer, padding between the list and the
+// footer so the footer always lands on the terminal's last line instead of
+// floating directly under a short list.
+func (m Model) mainView() string {
+	var top strings.Builder
+	top.WriteString(m.headerView())
+	top.WriteString("\n")
+	if m.filtering {
+		top.WriteString(m.filterView())
+		top.WriteString("\n")
+	}
+	top.WriteString(m.listView())
+
+	var bottom strings.Builder
+	if m.searching {
+		bottom.WriteString(m.searchInput.View())
+		if err := m.store.QueryError(); err != nil {
+			bottom.WriteString("  ")
+			bottom.WriteString(m.styles.SearchErr.Render(err.Error()))
+		}
+		bottom.WriteString("\n")
+	}
+	bottom.WriteString(m.footerView())
+
+	// The separator newlines themselves start new lines, so joining a topH-line
+	// and a bottomH-line block with gap newlines yields topH+gap+bottomH-1 lines.
+	gap := m.height - lipgloss.Height(top.String()) - lipgloss.Height(bottom.String()) + 1
+	return top.String() + strings.Repeat("\n", max(1, gap)) + bottom.String()
 }
 
 func (m Model) headerView() string {
@@ -58,7 +114,7 @@ func (m Model) headerView() string {
 		filter = "_______"
 	}
 	level := m.store.Level()
-	title := m.styles.Header.Render("prettylogs")
+	title := m.styles.Wordmark.Render(wordmark)
 	search := fmt.Sprintf("🔍 Filter: [%s]", filter)
 	stats := fmt.Sprintf("📊 ERROR %d │ WARN %d │ INFO %d │ DEBUG %d",
 		counts[record.LevelError], counts[record.LevelWarn], counts[record.LevelInfo], counts[record.LevelDebug])
@@ -98,7 +154,7 @@ func (m Model) footerView() string {
 	if n > 0 {
 		pos = m.selected + 1
 	}
-	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  l level  │  r restart │  q quit", pos, n)
+	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  y pretty copy  │  Y raw copy  │  l level  │  r restart │  q quit", pos, n)
 	if m.copyStatus != "" {
 		text = m.copyStatus + "  │  " + text
 	}
@@ -332,12 +388,87 @@ func prettyJSON(raw string) string {
 	return buf.String()
 }
 
+// helpChrome is the horizontal space the modal's border (1 each side) and
+// Help padding (2 each side) take from Width().
+const helpChrome = 6
+
+// modalWidth is the total width of the help/theme boxes: as wide as the
+// terminal allows up to 4/5 of it, leaving a gutter so the list shows through.
+func (m Model) modalWidth() int {
+	return max(56, min(m.width-4, m.width*4/5))
+}
+
+// helpCapacity is how many help lines fit in the modal, leaving room for the
+// box border and the surrounding header/footer.
+func (m Model) helpCapacity() int {
+	return max(6, m.height-6)
+}
+
+// helpWindow returns the full help lines, the slice visible at the clamped
+// scroll offset, whether a scroll indicator is needed, and that offset.
+func (m Model) helpWindow() (lines, visible []string, indicator bool, offset int) {
+	// Wrap to the box's inner width first so one element of lines is always
+	// one rendered row; otherwise a wrapped line would make the modal taller
+	// than the window we budgeted for.
+	lines = wrapToWidth(strings.Split(formatHelp(m.styles), "\n"), m.modalWidth()-helpChrome)
+	capacity := m.helpCapacity()
+	if len(lines) <= capacity {
+		return lines, lines, false, 0
+	}
+	visibleN := max(1, capacity-1) // last line shows the scroll indicator
+	offset = clamp(m.helpScroll, 0, len(lines)-visibleN)
+	return lines, lines[offset : offset+visibleN], true, offset
+}
+
+func (m Model) maxHelpScroll() int {
+	lines, visible, indicator, _ := m.helpWindow()
+	if !indicator {
+		return 0
+	}
+	return max(0, len(lines)-len(visible))
+}
+
 func (m Model) helpView() string {
+	lines, visible, indicator, offset := m.helpWindow()
+	body := strings.Join(visible, "\n")
+	if indicator {
+		label := fmt.Sprintf("── lines %d-%d of %d · j/k scroll ──",
+			offset+1, offset+len(visible), len(lines))
+		body += "\n" + m.styles.Dim.Render(label)
+	}
+	return m.styles.Help.
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(themeColor("dim")).
+		Width(m.modalWidth()).
+		Render(body)
+}
+
+func (m Model) themeView() string {
+	presets := themePresets()
+	var b strings.Builder
+	b.WriteString(m.styles.Header.Render("Choose theme"))
+	b.WriteString("\n")
+	for i, p := range presets {
+		cursor := "  "
+		if i == m.themeIdx {
+			cursor = "> "
+		}
+		line := cursor + p.Name
+		if i == m.themeIdx {
+			line = m.styles.Selected.Render(line)
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(themePreviewLine(presets[m.themeIdx].Theme))
+	b.WriteString("\n")
+	b.WriteString(m.styles.Dim.Render("Enter to apply, Esc to cancel"))
 	box := m.styles.Help.
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(themeColor("dim")).
-		Width(max(40, min(m.width-4, 64))).
-		Render(formatHelp(m.colorProfile))
+		Width(m.modalWidth()).
+		Render(strings.TrimRight(b.String(), "\n"))
 	return box
 }
 

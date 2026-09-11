@@ -10,8 +10,14 @@ import (
 	"github.com/tcontardo/prettylogs/internal/record"
 )
 
+// wordmarkColor is deliberately outside every theme palette: no preset uses
+// purple/magenta for a level, and status badges use green/warn/error, so the
+// header title never collides with a level color.
+var wordmarkColor = lipgloss.Color("#c678dd")
+
 type Styles struct {
 	Header          lipgloss.Style
+	Wordmark        lipgloss.Style
 	Footer          lipgloss.Style
 	Border          lipgloss.Style
 	Selected        lipgloss.Style
@@ -35,9 +41,10 @@ type Styles struct {
 func NewStyles(theme config.Theme) Styles {
 	border := themeColor(theme.Border)
 	s := Styles{
-		Header: lipgloss.NewStyle().Bold(true).Padding(0, 1),
-		Footer: lipgloss.NewStyle().Faint(true).Padding(0, 1),
-		Border: lipgloss.NewStyle().Foreground(border),
+		Header:   lipgloss.NewStyle().Bold(true).Padding(0, 1),
+		Wordmark: lipgloss.NewStyle().Bold(true).Foreground(wordmarkColor).Padding(0, 1),
+		Footer:   lipgloss.NewStyle().Faint(true).Padding(0, 1),
+		Border:   lipgloss.NewStyle().Foreground(border),
 		Selected: lipgloss.NewStyle().
 			Bold(true).
 			Border(lipgloss.NormalBorder(), false, false, false, true).
@@ -60,6 +67,7 @@ func NewStyles(theme config.Theme) Styles {
 	if theme.Background != "" && theme.Background != "default" {
 		bg := themeColor(theme.Background)
 		s.Header = s.Header.Background(bg)
+		s.Wordmark = s.Wordmark.Background(bg)
 		s.Footer = s.Footer.Background(bg)
 	}
 	s.levelColor = map[string]lipgloss.Style{
@@ -87,7 +95,7 @@ func (s Styles) Level(level string) lipgloss.Style {
 // Spine returns the left-border wrapping style for a row, colored by its
 // level so the level is scannable down the left margin of every row, not
 // just the badge text. Selection is shown via a heavier border weight
-// (ThickBorder vs NormalBorder) rather than a different color, so a row's
+// (solid block vs thin line) rather than a different color, so a row's
 // spine color never changes as the cursor moves onto or off of it.
 func (s Styles) Spine(level string, selected bool) lipgloss.Style {
 	color, ok := s.spineColor[level]
@@ -96,7 +104,9 @@ func (s Styles) Spine(level string, selected bool) lipgloss.Style {
 	}
 	border := lipgloss.NormalBorder()
 	if selected {
-		border = lipgloss.ThickBorder()
+		// InnerHalfBlockBorder's left edge is "▐": same weight as "▌" but
+		// sitting on the right of the cell, against the row content.
+		border = lipgloss.InnerHalfBlockBorder()
 	}
 	return lipgloss.NewStyle().
 		Border(border, false, false, false, true).

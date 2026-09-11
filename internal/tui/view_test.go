@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tcontardo/prettylogs/internal/config"
@@ -41,9 +42,43 @@ func TestViewRendersCollapsedBlock(t *testing.T) {
 		Raw:       "Database connection failed",
 	})
 	content := m.View().Content
-	for _, want := range []string{"prettylogs", "ERROR", "Database connection failed", "auth.service.ts:124"} {
+	for _, want := range []string{wordmark, "ERROR", "Database connection failed", "auth.service.ts:124"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("view missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestHeaderWordmark(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	got := headerText(m)
+	if !strings.Contains(got, wordmark) {
+		t.Fatalf("header missing wordmark %q:\n%s", wordmark, got)
+	}
+	if strings.Contains(got, "prettylogs") {
+		t.Fatalf("header should use the small-caps wordmark, not ASCII prettylogs:\n%s", got)
+	}
+	colored := m.styles.Wordmark.Render(wordmark)
+	plain := lipgloss.NewStyle().Bold(true).Padding(0, 1).Render(wordmark)
+	if colored == plain {
+		t.Fatal("wordmark should be colored, not just bold")
+	}
+	if !m.styles.Wordmark.GetBold() {
+		t.Fatal("wordmark should be bold")
+	}
+}
+
+// The header title must not share a color with any level badge or status, so
+// it reads as a wordmark rather than as another piece of log data.
+func TestWordmarkColorIsUnusedElsewhere(t *testing.T) {
+	t.Parallel()
+	for _, p := range themePresets() {
+		theme := p.Theme
+		for _, in := range []string{theme.Error, theme.Warn, theme.Info, theme.Debug, theme.Border, theme.Background, "green"} {
+			if sameRGBA(themeColor(in), wordmarkColor) {
+				t.Fatalf("theme %q color %q collides with the wordmark color", p.Name, in)
+			}
 		}
 	}
 }
@@ -253,6 +288,22 @@ func TestRenderEntryEmptySourceShowsDash(t *testing.T) {
 	}
 }
 
+func TestFooterSticksToBottom(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(
+		record.Record{Level: record.LevelError, Message: "boom", Raw: "boom"},
+		record.Record{Level: record.LevelInfo, Message: "listening", Raw: "listening"},
+	)
+	m.height = 12
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
+	if len(lines) != m.height {
+		t.Fatalf("view should fill the terminal height: got %d lines want %d", len(lines), m.height)
+	}
+	if !strings.Contains(lines[len(lines)-1], "q quit") {
+		t.Fatalf("footer should be the last line, got %q", lines[len(lines)-1])
+	}
+}
+
 func TestSpineUsesThickBorderForSelectedRow(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(
@@ -271,8 +322,8 @@ func TestSpineUsesThickBorderForSelectedRow(t *testing.T) {
 			otherLine = l
 		}
 	}
-	if !strings.HasPrefix(ansi.Strip(selectedLine), "┃") {
-		t.Fatalf("selected row should use the thick spine border, got: %q", selectedLine)
+	if !strings.HasPrefix(ansi.Strip(selectedLine), "▐") {
+		t.Fatalf("selected row should use the right half-block spine, got: %q", selectedLine)
 	}
 	if !strings.HasPrefix(ansi.Strip(otherLine), "│") {
 		t.Fatalf("non-selected row should use the normal spine border, got: %q", otherLine)
@@ -443,22 +494,119 @@ func TestHelpOverlay(t *testing.T) {
 func TestFooterOmitsColorProfile(t *testing.T) {
 	t.Parallel()
 	m := newTestModel()
-	m.colorProfile = "TrueColor"
 	content := ansi.Strip(m.View().Content)
 	if strings.Contains(content, "color:") {
 		t.Fatalf("footer should not show color profile:\n%s", content)
 	}
 }
 
-func TestHelpShowsColorProfile(t *testing.T) {
+func TestFooterShowsCopyHints(t *testing.T) {
 	t.Parallel()
 	m := newTestModel()
-	m.colorProfile = "TrueColor"
+	content := ansi.Strip(m.View().Content)
+	for _, want := range []string{"y pretty copy", "Y raw copy"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("footer missing %q:\n%s", want, content)
+		}
+	}
+}
+
+func TestHelpUsesWordmark(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	updated, _ := m.handleKey(keyMsg("?"))
+	m = updated.(Model)
+	stripped := ansi.Strip(m.helpView())
+	if !strings.Contains(stripped, wordmark) {
+		t.Fatalf("help missing wordmark %q:\n%s", wordmark, stripped)
+	}
+	if strings.Contains(stripped, "prettylogs") {
+		t.Fatalf("help should use the small-caps wordmark, not ASCII prettylogs:\n%s", stripped)
+	}
+	raw := m.helpView()
+	plain := wordmark + " - Keyboard Shortcuts"
+	if strings.Contains(raw, plain) && !strings.Contains(raw, "\x1b") {
+		t.Fatal("help wordmark should be styled")
+	}
+	if m.styles.Wordmark.UnsetPadding().Render(wordmark) == wordmark {
+		t.Fatal("wordmark style should add color/bold SGR")
+	}
+	if !strings.Contains(raw, m.styles.Wordmark.UnsetPadding().Render(wordmark)) {
+		t.Fatalf("help title should use the wordmark style:\n%s", raw)
+	}
+}
+
+func TestHelpOmitsColorProfile(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	updated, _ := m.handleKey(keyMsg("?"))
+	m = updated.(Model)
+	updated, _ = m.handleKey(keyMsg("G"))
+	m = updated.(Model)
+	content := ansi.Strip(m.View().Content)
+	if strings.Contains(content, "Color profile:") {
+		t.Fatalf("help should not show color profile:\n%s", content)
+	}
+}
+
+func TestHelpRendersAsModalOverLogs(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(record.Record{Level: record.LevelError, Message: "boom-behind-modal", Raw: "boom-behind-modal"})
 	updated, _ := m.handleKey(keyMsg("?"))
 	m = updated.(Model)
 	content := ansi.Strip(m.View().Content)
-	if !strings.Contains(content, "Color profile: TrueColor") {
-		t.Fatalf("help should show color profile:\n%s", content)
+	if !strings.Contains(content, "Keyboard Shortcuts") {
+		t.Fatalf("help modal missing:\n%s", content)
+	}
+	if !strings.Contains(content, "q quit") {
+		t.Fatalf("footer should stay visible behind the modal:\n%s", content)
+	}
+	if lines := strings.Split(content, "\n"); len(lines) != m.height {
+		t.Fatalf("modal view should still fill the terminal: got %d lines want %d", len(lines), m.height)
+	}
+}
+
+func TestHelpModalIsWiderThanBefore(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	m.width = 120
+	updated, _ := m.handleKey(keyMsg("?"))
+	m = updated.(Model)
+	if w := ansi.StringWidth(strings.Split(ansi.Strip(m.helpView()), "\n")[0]); w <= 64 {
+		t.Fatalf("help modal width %d should exceed the old 64-column cap", w)
+	}
+}
+
+func TestHelpScrolls(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	m.height = 16
+	updated, _ := m.handleKey(keyMsg("?"))
+	m = updated.(Model)
+	if m.helpScroll != 0 {
+		t.Fatalf("help should open at the top, got %d", m.helpScroll)
+	}
+	first := ansi.Strip(m.helpView())
+	if !strings.Contains(first, "j/k scroll") {
+		t.Fatalf("short terminal should show the scroll indicator:\n%s", first)
+	}
+
+	updated, _ = m.handleKey(keyMsg("j"))
+	m = updated.(Model)
+	if m.helpScroll != 1 {
+		t.Fatalf("j should scroll help by one line, got %d", m.helpScroll)
+	}
+
+	updated, _ = m.handleKey(keyMsg("G"))
+	m = updated.(Model)
+	if !strings.Contains(ansi.Strip(m.helpView()), "Press ? or Esc to close") {
+		t.Fatalf("G should reach the end of help:\n%s", ansi.Strip(m.helpView()))
+	}
+
+	updated, _ = m.handleKey(keyMsg("g"))
+	m = updated.(Model)
+	if m.helpScroll != 0 {
+		t.Fatalf("g should return to the top, got %d", m.helpScroll)
 	}
 }
 
