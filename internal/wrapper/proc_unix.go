@@ -15,9 +15,12 @@ func killProcess(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	pgid := cmd.Process.Pid
-	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+}
+
+func forceKillProcess(cmd *exec.Cmd) error {
+	if cmd.Process == nil {
+		return nil
 	}
-	return nil
+	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }

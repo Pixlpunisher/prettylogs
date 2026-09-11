@@ -638,6 +638,74 @@ func TestHeaderShowsExitedWithExitCode(t *testing.T) {
 	}
 }
 
+func TestRestartNoOpWithoutWrapper(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(record.Record{Level: record.LevelInfo, Message: "keep", Raw: "keep"})
+	before := m.store.Len()
+	status := m.status
+	updated, cmd := m.handleKey(keyMsg("r"))
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("r should be a no-op without a wrapped command")
+	}
+	if m.status != status {
+		t.Fatalf("status: got %q want %q", m.status, status)
+	}
+	if m.store.Len() != before {
+		t.Fatalf("store len: got %d want %d", m.store.Len(), before)
+	}
+}
+
+func TestRestartAfterExitResetsCompilingAndKeepsLogs(t *testing.T) {
+	out := make(chan record.Record, 8)
+	w, err := wrapper.StartCommand("true", nil, parser.AutoParser{}, out)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := w.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	st := store.New(100)
+	st.Add(record.Record{Level: record.LevelInfo, Message: "prior", Raw: "prior"})
+	m := New(st, out, config.Default(), w)
+	m.width = 80
+	m.height = 24
+	updated, _ := m.Update(sourceDoneMsg{})
+	m = updated.(Model)
+	if m.status != statusExited {
+		t.Fatalf("status after source done: got %q want %q", m.status, statusExited)
+	}
+	updated, cmd := m.handleKey(keyMsg("r"))
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("r should restart an exited wrapped command")
+	}
+	updated, _ = m.Update(cmd())
+	m = updated.(Model)
+	if m.status != statusCompiling {
+		t.Fatalf("status after restart: got %q want %q", m.status, statusCompiling)
+	}
+	if m.exitCode != nil {
+		t.Fatalf("exit code should be cleared, got %d", *m.exitCode)
+	}
+	updated, _ = m.Update(logMsg{rec: record.Record{Level: record.LevelInfo, Message: "after", Raw: "after"}})
+	m = updated.(Model)
+	if m.store.Len() != 2 {
+		t.Fatalf("store should keep prior logs and accept new ones, got %d", m.store.Len())
+	}
+}
+
+func TestHelpListsRestart(t *testing.T) {
+	t.Parallel()
+	m := newTestModel()
+	updated, _ := m.handleKey(keyMsg("?"))
+	m = updated.(Model)
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "Restart") {
+		t.Fatalf("help should list restart:\n%s", content)
+	}
+}
+
 const longErrorTail = "UNIQUE_TAIL"
 
 func longErrorModel() Model {

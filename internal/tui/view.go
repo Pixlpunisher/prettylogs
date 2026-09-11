@@ -75,6 +75,9 @@ func (m Model) headerView() string {
 }
 
 func (m Model) statusBadge() string {
+	if m.quitting {
+		return m.styles.StatusExited.Render("● Shutting down..")
+	}
 	switch m.status {
 	case statusCompiling:
 		return m.styles.StatusCompiling.Render("● Compiling..")
@@ -95,7 +98,7 @@ func (m Model) footerView() string {
 	if n > 0 {
 		pos = m.selected + 1
 	}
-	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  l level  │  q quit", pos, n)
+	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  l level  │  r restart │  q quit", pos, n)
 	if m.copyStatus != "" {
 		text = m.copyStatus + "  │  " + text
 	}

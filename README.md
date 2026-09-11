@@ -6,11 +6,17 @@ A CLI log TUI. Wrap a command or pipe logs in, then browse them as collapsible b
 
 ```bash
 make build
+./prettylogs --help
 ```
 
+`make build` only writes `./prettylogs` in this repo. zsh will say `command not found: prettylogs` until the binary is on your `PATH`. Either use `./prettylogs`, or:
+
 ```bash
-go install ./cmd/prettylogs
+make install
+hash -r
 ```
+
+`make install` runs `go install` into `GOBIN` (often `~/go/bin`). `hash -r` clears zsh’s stale command cache.
 
 ## Usage
 
@@ -32,6 +38,8 @@ prettylogs --config ~/.prettyLogs/config npm run dev
 | `/` | Search (regex) |
 | `n` / `N` | Next/previous match |
 | `l` | Filter by log level |
+| `y` / `Y` | Copy selected (pretty / raw) |
+| `r` | Restart wrapped command |
 | `g` / `G` | First/last |
 | `PageDown` / `PageUp` | Page |
 | `?` | Help |
