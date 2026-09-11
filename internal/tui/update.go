@@ -38,13 +38,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, listenTickCmd(m)
 
 	case sourceDoneMsg:
-		m.status = statusExited
-		if m.wrapper != nil {
-			if code, ok := m.wrapper.ExitCode(); ok {
-				m.exitCode = &code
-			}
+		if m.quitting || m.restarting {
+			return m, nil
 		}
+		if m.wrapper != nil {
+			code, ok := m.wrapper.ExitCode()
+			if !ok {
+				return m, nil
+			}
+			m.exitCode = &code
+		}
+		m.status = statusExited
 		return m, nil
+
+	case quitDoneMsg:
+		return m, tea.Quit
+
+	case restartDoneMsg:
+		m.restarting = false
+		if m.quitting {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.status = statusExited
+			return m, nil
+		}
+		m.status = statusCompiling
+		m.compileHold = false
+		m.exitCode = nil
+		m.follow = true
+		if n := len(m.rows()); n > 0 {
+			m.selected = n - 1
+		}
+		return m, tea.Batch(waitForDone(m.wrapper), listenTickCmd(m))
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -78,6 +104,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "Y", "shift+y":
 		m.copySelection(true)
 		return m, nil
+	case "r":
+		return m, m.restartCmd()
 	case "?":
 		m.help = true
 	case "j", "down":
@@ -217,14 +245,32 @@ func (m Model) handleFilter(key string) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) quit() (tea.Model, tea.Cmd) {
-	if m.wrapper != nil {
-		_ = m.wrapper.Stop()
+	if m.quitting {
+		return m, nil
 	}
-	return m, tea.Quit
+	m.quitting = true
+	if m.wrapper == nil {
+		return m, tea.Quit
+	}
+	m.wrapper.Abandon()
+	return m, func() tea.Msg {
+		_ = m.wrapper.Stop()
+		return quitDoneMsg{}
+	}
+}
+
+func (m *Model) restartCmd() tea.Cmd {
+	if m.quitting || m.restarting || m.wrapper == nil || !m.wrapper.CanRestart() {
+		return nil
+	}
+	m.restarting = true
+	return func() tea.Msg {
+		return restartDoneMsg{err: m.wrapper.Restart()}
+	}
 }
 
 func (m *Model) applyCompilePhase(line string) tea.Cmd {
-	if m.status == statusExited {
+	if m.status == statusExited || m.quitting || m.restarting {
 		return nil
 	}
 	start, end := parser.CompilePhase(line)
@@ -267,7 +313,10 @@ func (m Model) hasExpanded() bool {
 }
 
 func needsListenTick(m Model) bool {
-	if m.wrapper == nil || m.status == statusExited || m.status == statusRunning {
+	if m.wrapper == nil || m.quitting || m.restarting {
+		return false
+	}
+	if m.status == statusExited || m.status == statusRunning {
 		return false
 	}
 	if m.compileHold || m.hasExpanded() {

@@ -18,6 +18,7 @@ Interaction
   l         Filter by log level
   y         Copy selected (pretty)
   Y         Copy selected (raw)
+  r         Restart wrapped command
   ?         Show this help
 
 General

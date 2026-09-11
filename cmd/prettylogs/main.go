@@ -61,16 +61,13 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("start command: %w", err)
 		}
-		go func() {
-			_ = w.Wait()
-			close(logCh)
-		}()
 	}
 
 	model := tui.New(store.New(store.DefaultMaxSize), logCh, cfg, w)
 	prog := tea.NewProgram(model)
 	if _, err := prog.Run(); err != nil {
 		if w != nil {
+			w.Abandon()
 			_ = w.Stop()
 		}
 		return err

@@ -18,6 +18,12 @@ type sourceDoneMsg struct{}
 
 type listenTickMsg struct{}
 
+type quitDoneMsg struct{}
+
+type restartDoneMsg struct {
+	err error
+}
+
 type procStatus string
 
 const (
@@ -50,6 +56,8 @@ type Model struct {
 	exitCode    *int
 	compileHold bool // log-detected compile; listen port must not override
 	follow      bool
+	quitting    bool
+	restarting  bool
 
 	copyStatus string // last y/Y result; cleared on the next navigation key
 
@@ -86,7 +94,17 @@ func initialStatus(w *wrapper.Wrapper) procStatus {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(waitForLog(m.logs), listenTickCmd(m))
+	return tea.Batch(waitForLog(m.logs), listenTickCmd(m), waitForDone(m.wrapper))
+}
+
+func waitForDone(w *wrapper.Wrapper) tea.Cmd {
+	if w == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_ = w.Wait()
+		return sourceDoneMsg{}
+	}
 }
 
 func waitForLog(ch <-chan record.Record) tea.Cmd {
