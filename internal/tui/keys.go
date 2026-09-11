@@ -16,6 +16,8 @@ Interaction
   n         Next match
   N         Previous match
   l         Filter by log level
+  y         Copy selected (pretty)
+  Y         Copy selected (raw)
   ?         Show this help
 
 General

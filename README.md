@@ -5,7 +5,7 @@ A CLI log TUI. Wrap a command or pipe logs in, then browse them as collapsible b
 ## Build
 
 ```bash
-go build -o prettylogs ./cmd/prettylogs
+make build
 ```
 
 ```bash
