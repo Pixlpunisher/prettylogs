@@ -51,6 +51,7 @@ type Model struct {
 	filtering   bool
 	filterIdx   int
 	help        bool
+	helpScroll  int // first visible help line while the help modal is open
 	theming     bool
 	themeIdx    int
 	themeName   string
@@ -63,8 +64,6 @@ type Model struct {
 	restarting  bool
 
 	copyStatus string // last y/Y result; cleared on the next navigation key
-
-	colorProfile string // diagnostic: what bubbletea detected, shown in help
 
 	freezeID     uint64         // last record ID visible while a row is expanded; 0 = live
 	frozenCounts map[string]int // header counts pinned at expand

@@ -17,10 +17,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchInput.SetWidth(max(10, m.width-20))
 		return m, nil
 
-	case tea.ColorProfileMsg:
-		m.colorProfile = msg.String()
-		return m, nil
-
 	case logMsg:
 		wasFollow := m.follow
 		m.store.Add(msg.rec)
@@ -112,6 +108,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.restartCmd()
 	case "?":
 		m.help = true
+		m.helpScroll = 0
 	case "j", "down":
 		m.move(1)
 	case "k", "up":
@@ -150,6 +147,18 @@ func (m Model) handleHelpKey(key string) (tea.Model, tea.Cmd) {
 		m.theming = true
 		m.themeIdx = themeIndexByName(m.themeName)
 		return m, nil
+	case "j", "down":
+		m.scrollHelp(1)
+	case "k", "up":
+		m.scrollHelp(-1)
+	case "pgdown", "ctrl+j":
+		m.scrollHelp(m.helpCapacity())
+	case "pgup", "ctrl+k":
+		m.scrollHelp(-m.helpCapacity())
+	case "g":
+		m.helpScroll = 0
+	case "G", "shift+g":
+		m.helpScroll = m.maxHelpScroll()
 	case "?", "esc":
 		m.help = false
 	case "q":
@@ -159,6 +168,10 @@ func (m Model) handleHelpKey(key string) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m *Model) scrollHelp(delta int) {
+	m.helpScroll = clamp(m.helpScroll+delta, 0, m.maxHelpScroll())
 }
 
 func (m Model) handleThemeKey(key string) (tea.Model, tea.Cmd) {

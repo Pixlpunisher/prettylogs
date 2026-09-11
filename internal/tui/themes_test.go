@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/tcontardo/prettylogs/internal/config"
+	"github.com/tcontardo/prettylogs/internal/record"
 )
 
 func TestThemePresets(t *testing.T) {
@@ -25,6 +26,22 @@ func TestThemePresets(t *testing.T) {
 	if presets[0].Theme.Error != def.Error || presets[0].Theme.Warn != def.Warn ||
 		presets[0].Theme.Info != def.Info || presets[0].Theme.Debug != def.Debug {
 		t.Fatalf("Default preset %+v want %+v", presets[0].Theme, def)
+	}
+}
+
+func TestThemePickerRendersAsModalOverLogs(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(record.Record{Level: record.LevelError, Message: "boom-behind-picker", Raw: "boom-behind-picker"})
+	updated, _ := m.handleKey(keyMsg("?"))
+	m = updated.(Model)
+	updated, _ = m.handleKey(keyMsg("t"))
+	m = updated.(Model)
+	content := ansi.Strip(m.View().Content)
+	if !strings.Contains(content, "Choose theme") {
+		t.Fatalf("theme picker missing:\n%s", content)
+	}
+	if !strings.Contains(content, "q quit") {
+		t.Fatalf("footer should stay visible behind the picker:\n%s", content)
 	}
 }
 
@@ -138,6 +155,9 @@ func TestHelpMentionsThemeKey(t *testing.T) {
 	t.Parallel()
 	m := newTestModel()
 	updated, _ := m.handleKey(keyMsg("?"))
+	m = updated.(Model)
+	// The theme key sits in the General block near the end of help.
+	updated, _ = m.handleKey(keyMsg("G"))
 	m = updated.(Model)
 	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, "Choose theme") {

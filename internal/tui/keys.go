@@ -1,8 +1,6 @@
 package tui
 
-const helpText = `prettylogs - Keyboard Shortcuts
-
-Navigation
+const helpBody = `Navigation
   j / ↓     Move down (scrolls expanded detail if it doesn't fit)
   k / ↑     Move up (scrolls expanded detail if it doesn't fit)
   g         Go to first line (top of detail, if scrolling one)
@@ -27,11 +25,9 @@ General
   Esc        Close dialog / help
 `
 
-func formatHelp(colorProfile string) string {
-	if colorProfile == "" {
-		colorProfile = "unknown"
-	}
-	return helpText + "Color profile: " + colorProfile + "\n\nPress ? or Esc to close"
+func formatHelp(s Styles) string {
+	title := s.Wordmark.UnsetPadding().Render(wordmark) + " - Keyboard Shortcuts"
+	return title + "\n\n" + helpBody + "\nPress ? or Esc to close"
 }
 
 var levelOptions = []string{"All", "ERROR", "WARN", "INFO", "DEBUG"}
