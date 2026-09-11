@@ -51,6 +51,8 @@ type Model struct {
 	compileHold bool // log-detected compile; listen port must not override
 	follow      bool
 
+	copyStatus string // last y/Y result; cleared on the next navigation key
+
 	colorProfile string // diagnostic: what bubbletea detected, shown in help
 
 	freezeID     uint64         // last record ID visible while a row is expanded; 0 = live

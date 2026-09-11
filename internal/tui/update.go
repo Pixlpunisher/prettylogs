@@ -65,9 +65,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilter(key)
 	}
 
+	if key != "y" && key != "Y" && key != "shift+y" {
+		m.copyStatus = ""
+	}
+
 	switch key {
 	case "ctrl+c", "q":
 		return m.quit()
+	case "y":
+		m.copySelection(false)
+		return m, nil
+	case "Y", "shift+y":
+		m.copySelection(true)
+		return m, nil
 	case "?":
 		m.help = true
 	case "j", "down":

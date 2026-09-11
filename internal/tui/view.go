@@ -96,6 +96,9 @@ func (m Model) footerView() string {
 		pos = m.selected + 1
 	}
 	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  l level  │  q quit", pos, n)
+	if m.copyStatus != "" {
+		text = m.copyStatus + "  │  " + text
+	}
 	if err := m.store.QueryError(); err != nil {
 		text = m.styles.SearchErr.Render(err.Error()) + "  │  " + text
 	}
