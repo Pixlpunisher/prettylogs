@@ -37,7 +37,6 @@ func parsePlain(line string) record.Record {
 	if m := levelPrefix.FindStringSubmatch(rest); m != nil {
 		rec.Level = NormalizeLevel(m[1])
 		rec.Message = strings.TrimSpace(m[2])
-		rest = rec.Message
 	} else {
 		rec.Level = inferFrontendLevel(rest)
 	}

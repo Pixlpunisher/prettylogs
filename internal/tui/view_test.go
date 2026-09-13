@@ -848,7 +848,8 @@ func TestHelpListsRestart(t *testing.T) {
 	m := newTestModel()
 	updated, _ := m.handleKey(keyMsg("?"))
 	m = updated.(Model)
-	content := ansi.Strip(m.View().Content)
+	lines, _, _, _ := m.helpWindow()
+	content := ansi.Strip(strings.Join(lines, "\n"))
 	if !strings.Contains(content, "Restart") {
 		t.Fatalf("help should list restart:\n%s", content)
 	}
