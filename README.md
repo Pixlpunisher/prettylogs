@@ -6,11 +6,10 @@ Similar INFO, DEBUG, and WARN lines fold into groups. ERROR stays as its own row
 
 ## Install
 
-Via Homebrew (requires GitHub access to the private `Pixlpunisher` repos, e.g. `gh auth login` or an SSH key on the org):
+Via Homebrew:
 
 ```bash
 brew tap Pixlpunisher/prettylogs
-brew trust pixlpunisher/prettylogs   # one-time: this tap isn't from Homebrew core
 brew install prettylogs
 ```
 
