@@ -53,7 +53,7 @@ func run() error {
 
 	if useStdin {
 		go func() {
-			wrapper.StreamReader(os.Stdin, p, logCh)
+			wrapper.StreamReader(os.Stdin, p, logCh, nil)
 			close(logCh)
 		}()
 	} else {

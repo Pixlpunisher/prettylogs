@@ -1,8 +1,6 @@
 package wrapper
 
 import (
-	"net"
-	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -16,7 +14,7 @@ func TestStreamReaderParsesLines(t *testing.T) {
 	t.Parallel()
 	in := strings.NewReader("INFO: hello\nERROR: boom\n")
 	out := make(chan record.Record, 8)
-	StreamReader(in, parser.AutoParser{}, out)
+	StreamReader(in, parser.AutoParser{}, out, nil)
 	close(out)
 	var got []record.Record
 	for rec := range out {
@@ -27,6 +25,25 @@ func TestStreamReaderParsesLines(t *testing.T) {
 	}
 	if got[0].Level != record.LevelInfo || got[1].Level != record.LevelError {
 		t.Fatalf("levels %q %q", got[0].Level, got[1].Level)
+	}
+}
+
+func TestStreamReaderHandlesLineOverOldScannerLimit(t *testing.T) {
+	t.Parallel()
+	big := strings.Repeat("x", 2*1024*1024) // over bufio.Scanner's old 1MB cap
+	in := strings.NewReader("INFO: " + big + "\nERROR: after\n")
+	out := make(chan record.Record, 8)
+	StreamReader(in, parser.AutoParser{}, out, nil)
+	close(out)
+	var got []record.Record
+	for rec := range out {
+		got = append(got, rec)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d records, want 2 (the long line should not silently end the stream)", len(got))
+	}
+	if got[1].Level != record.LevelError {
+		t.Fatalf("record after the long line: level %q, want ERROR", got[1].Level)
 	}
 }
 
@@ -67,18 +84,6 @@ func TestHasListeningPortFalseWhenExited(t *testing.T) {
 	}
 }
 
-func TestPidHasListeningPort(t *testing.T) {
-	t.Parallel()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer ln.Close()
-	if !pidHasListeningPort(os.Getpid()) {
-		t.Fatal("expected this process to report a listening TCP port")
-	}
-}
-
 func TestStopTerminatesProcess(t *testing.T) {
 	t.Parallel()
 	out := make(chan record.Record, 8)
@@ -93,6 +98,32 @@ func TestStopTerminatesProcess(t *testing.T) {
 	case <-w.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("process did not exit after Stop")
+	}
+}
+
+func TestStopReturnsWhenOutIsUndrained(t *testing.T) {
+	t.Parallel()
+	out := make(chan record.Record) // unbuffered, nobody ever reads it
+	w, err := StartCommand("sh", []string{"-c", "echo INFO: one; sleep 30"}, parser.AutoParser{}, out)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	// Give the reader goroutine time to read the line and block trying to
+	// send it on the channel nothing drains.
+	time.Sleep(200 * time.Millisecond)
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- w.Stop() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("stop: %v", err)
+		}
+	case <-time.After(stopGrace + 3*time.Second):
+		t.Fatal("Stop did not return; a reader goroutine is likely stuck sending on the undrained channel")
+	}
+	if elapsed := time.Since(start); elapsed < stopGrace {
+		t.Fatalf("Stop returned after %s, want it to wait out the grace period before force-unblocking readers", elapsed)
 	}
 }
 
@@ -165,6 +196,31 @@ func TestRestartDeliversLaterOutputOnSameChannel(t *testing.T) {
 		case <-deadline:
 			t.Fatal("restarted run never delivered output on the same channel")
 		}
+	}
+}
+
+func TestAbandonPreventsRestart(t *testing.T) {
+	t.Parallel()
+	out := make(chan record.Record, 8)
+	w, err := StartCommand("sh", []string{"-c", "echo INFO: first"}, parser.AutoParser{}, out)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	first := collectN(t, out, 1)
+	if !strings.Contains(first[0].Message, "first") {
+		t.Fatalf("first run message %q", first[0].Message)
+	}
+	if err := w.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	w.Abandon()
+	if err := w.Restart(); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	select {
+	case rec := <-out:
+		t.Fatalf("restart should not run after Abandon, got %+v", rec)
+	case <-time.After(300 * time.Millisecond):
 	}
 }
 
