@@ -84,15 +84,6 @@ theme:
   border: "dim"
 ```
 
-## Branches & commits
+## Contributing
 
-Keep these consistent so history stays readable and `git log`/`git blame` stay useful.
-
-**Branches**: `<type>/<short-kebab-description>`, e.g. `fix/wrapper-stop-deadlock`, `feat/json-array-support`, `ci/add-lint-job`. Types: `feat`, `fix`, `chore`, `docs`, `ci`, `refactor`, `test`.
-
-**Commits**:
-- Summary line: imperative present tense ("Fix", not "Fixed"/"Fixes"), no trailing period, ≤72 characters.
-- One logical change per commit — don't bundle an unrelated fix into a feature commit.
-- Add a body (blank line, then wrapped prose) when the *why* isn't obvious from the diff — a constraint, a bug's root cause, a tradeoff. Skip it when the summary already says everything.
-
-**Before merging**: rebase your branch onto `main` rather than merging `main` into it — `main` requires a linear history, so a merge commit (or an unrebased branch) won't be mergeable. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full pre-PR checklist.
+Branch naming, commit conventions, versioning policy, and the pre-PR checklist live in [CONTRIBUTING.md](CONTRIBUTING.md).
