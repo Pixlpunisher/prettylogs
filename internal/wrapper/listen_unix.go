@@ -19,13 +19,6 @@ func groupHasListeningPort(pgid int) bool {
 	return procGroupListening(pgid)
 }
 
-func pidHasListeningPort(pid int) bool {
-	if lsofListening("-p", strconv.Itoa(pid)) {
-		return true
-	}
-	return procListening(pid)
-}
-
 func lsofListening(flag, value string) bool {
 	cmd := exec.Command("lsof", "-nP", "-iTCP", "-sTCP:LISTEN", flag, value)
 	out, err := cmd.Output()

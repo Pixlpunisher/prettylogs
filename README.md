@@ -83,3 +83,7 @@ theme:
   background: "default"
   border: "dim"
 ```
+
+## Contributing
+
+Branch naming, commit conventions, versioning policy, and the pre-PR checklist live in [CONTRIBUTING.md](CONTRIBUTING.md).

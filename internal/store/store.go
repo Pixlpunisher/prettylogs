@@ -158,14 +158,14 @@ func (s *Store) matches(r *record.Record) bool {
 	return s.pattern.MatchString(r.Raw) || s.pattern.MatchString(r.Message)
 }
 
+// removeID drops the evicted record from filtered if it's present. Both
+// records and filtered are strictly ID-ascending (append-only, oldest
+// evicted from the front), so the record being evicted - always the
+// smallest ID in records - can only ever be filtered's first element; a
+// full scan could never find it anywhere else.
 func removeID(in []*record.Record, id uint64) []*record.Record {
 	if len(in) > 0 && in[0].ID == id {
 		return in[1:]
-	}
-	for i, r := range in {
-		if r.ID == id {
-			return append(in[:i], in[i+1:]...)
-		}
 	}
 	return in
 }

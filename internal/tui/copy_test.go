@@ -262,8 +262,8 @@ func TestCopySelectionPrettyAndRaw(t *testing.T) {
 	if *got != wantPretty {
 		t.Fatalf("clipboard pretty: got %q want %q", *got, wantPretty)
 	}
-	if !strings.Contains(m.footerView(), "copied 1 record") {
-		t.Fatalf("footer missing copy status:\n%s", m.footerView())
+	if !strings.Contains(m.footerView(m.rows()), "copied 1 record") {
+		t.Fatalf("footer missing copy status:\n%s", m.footerView(m.rows()))
 	}
 
 	updated, _ = m.handleKey(keyMsg("Y"))
@@ -295,8 +295,8 @@ func TestCopySelectionFooterCountsOmittedLines(t *testing.T) {
 	if m.copyStatus != want {
 		t.Fatalf("status: got %q want %q", m.copyStatus, want)
 	}
-	if !strings.Contains(m.footerView(), want) {
-		t.Fatalf("footer missing copy status:\n%s", m.footerView())
+	if !strings.Contains(m.footerView(m.rows()), want) {
+		t.Fatalf("footer missing copy status:\n%s", m.footerView(m.rows()))
 	}
 
 	updated, _ = m.handleKey(keyMsg("Y"))

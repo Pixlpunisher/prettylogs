@@ -84,6 +84,32 @@ func TestMaxSizeDropsOldest(t *testing.T) {
 	}
 }
 
+func TestMaxSizeEvictionRemovesFromFilteredWhenEvictedMatched(t *testing.T) {
+	t.Parallel()
+	s := New(2)
+	s.SetLevel(record.LevelInfo)
+	s.Add(rec(record.LevelInfo, "one"))
+	s.Add(rec(record.LevelInfo, "two"))
+	s.Add(rec(record.LevelInfo, "three"))
+	got := s.Filtered()
+	if len(got) != 2 || got[0].Message != "two" || got[1].Message != "three" {
+		t.Fatalf("filtered = %+v, want [two three]", got)
+	}
+}
+
+func TestMaxSizeEvictionLeavesFilteredIntactWhenEvictedDidNotMatch(t *testing.T) {
+	t.Parallel()
+	s := New(2)
+	s.SetLevel(record.LevelError)
+	s.Add(rec(record.LevelInfo, "one"))  // evicted later; never matched the filter
+	s.Add(rec(record.LevelError, "two")) // matches; must survive the eviction
+	s.Add(rec(record.LevelInfo, "three"))
+	got := s.Filtered()
+	if len(got) != 1 || got[0].Message != "two" {
+		t.Fatalf("filtered = %+v, want [two]", got)
+	}
+}
+
 func TestCountsIgnoreFilter(t *testing.T) {
 	t.Parallel()
 	s := New(10)

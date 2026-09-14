@@ -78,6 +78,10 @@ func spliceLine(base, overlay string, at, width int) string {
 // footer so the footer always lands on the terminal's last line instead of
 // floating directly under a short list.
 func (m Model) mainView() string {
+	// Computed once and shared: listView and footerView both need the same
+	// rows, and rows() does a store copy plus a grouping pass over it.
+	rows := m.rows()
+
 	var top strings.Builder
 	top.WriteString(m.headerView())
 	top.WriteString("\n")
@@ -85,7 +89,7 @@ func (m Model) mainView() string {
 		top.WriteString(m.filterView())
 		top.WriteString("\n")
 	}
-	top.WriteString(m.listView())
+	top.WriteString(m.listView(rows))
 
 	var bottom strings.Builder
 	if m.searching {
@@ -96,7 +100,7 @@ func (m Model) mainView() string {
 		}
 		bottom.WriteString("\n")
 	}
-	bottom.WriteString(m.footerView())
+	bottom.WriteString(m.footerView(rows))
 
 	// The separator newlines themselves start new lines, so joining a topH-line
 	// and a bottomH-line block with gap newlines yields topH+gap+bottomH-1 lines.
@@ -148,8 +152,8 @@ func (m Model) statusBadge() string {
 	}
 }
 
-func (m Model) footerView() string {
-	n := len(m.rows())
+func (m Model) footerView(rows []row) string {
+	n := len(rows)
 	pos := 0
 	if n > 0 {
 		pos = m.selected + 1
@@ -184,8 +188,7 @@ func (m Model) filterView() string {
 	return b.String()
 }
 
-func (m Model) listView() string {
-	rows := m.rows()
+func (m Model) listView(rows []row) string {
 	if len(rows) == 0 {
 		msg := "Waiting for logs…"
 		if m.store.Len() > 0 {

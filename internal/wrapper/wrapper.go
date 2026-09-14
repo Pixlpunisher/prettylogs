@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,10 +15,30 @@ import (
 
 const stopGrace = 5 * time.Second
 
+// stopSignal lets Stop() unblock a StreamReader that is stuck sending to an
+// undrained out channel (e.g. the TUI quit before consuming everything).
+// close is idempotent since Stop() and a force-kill timeout can race.
+type stopSignal struct {
+	ch   chan struct{}
+	once sync.Once
+}
+
+func newStopSignal() *stopSignal {
+	return &stopSignal{ch: make(chan struct{})}
+}
+
+func (s *stopSignal) close() {
+	if s == nil {
+		return
+	}
+	s.once.Do(func() { close(s.ch) })
+}
+
 type Wrapper struct {
 	mu       sync.Mutex
 	cmd      *exec.Cmd
 	done     chan struct{}
+	stop     *stopSignal
 	waitErr  error
 	exitOnce sync.Once
 	code     int
@@ -30,17 +51,35 @@ type Wrapper struct {
 	out    chan<- record.Record
 }
 
-func StreamReader(r io.Reader, p parser.Parser, out chan<- record.Record) {
+// StreamReader parses lines from r and feeds them to out until r is
+// exhausted, or (if stop is non-nil) until stop is closed. A bufio.Reader is
+// used instead of bufio.Scanner because Scanner silently stops at its first
+// too-long line (indistinguishable here from a clean EOF); ReadString has no
+// such line-length ceiling.
+func StreamReader(r io.Reader, p parser.Parser, out chan<- record.Record, stop <-chan struct{}) {
 	asm := parser.NewAssembler(p)
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		for _, rec := range asm.Feed(sc.Text()) {
-			out <- rec
+	br := bufio.NewReaderSize(r, 64*1024)
+	for {
+		line, err := br.ReadString('\n')
+		if len(line) > 0 {
+			for _, rec := range asm.Feed(strings.TrimRight(line, "\r\n")) {
+				select {
+				case out <- rec:
+				case <-stop:
+					return
+				}
+			}
+		}
+		if err != nil {
+			break
 		}
 	}
 	for _, rec := range asm.Flush() {
-		out <- rec
+		select {
+		case out <- rec:
+		case <-stop:
+			return
+		}
 	}
 }
 
@@ -81,9 +120,24 @@ func (w *Wrapper) start() error {
 	}
 
 	done := make(chan struct{})
+	stop := newStopSignal()
 	w.mu.Lock()
+	if w.abandon {
+		// Abandon() raced in between Restart()'s Stop() and this start():
+		// discard the process we just spawned instead of wiring it up, so
+		// no restarted process outlives an abandonment request.
+		w.mu.Unlock()
+		_ = killProcess(cmd)
+		_ = forceKillProcess(cmd)
+		go func() {
+			_ = cmd.Wait()
+			_ = devNull.Close()
+		}()
+		return nil
+	}
 	w.cmd = cmd
 	w.done = done
+	w.stop = stop
 	w.exitOnce = sync.Once{}
 	w.exited = false
 	w.code = 0
@@ -96,11 +150,11 @@ func (w *Wrapper) start() error {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		StreamReader(stdout, p, out)
+		StreamReader(stdout, p, out, stop.ch)
 	}()
 	go func() {
 		defer wg.Done()
-		StreamReader(stderr, p, out)
+		StreamReader(stderr, p, out, stop.ch)
 	}()
 	go func() {
 		wg.Wait()
@@ -148,6 +202,7 @@ func (w *Wrapper) Stop() error {
 	w.mu.Lock()
 	cmd := w.cmd
 	done := w.done
+	stop := w.stop
 	w.mu.Unlock()
 	if cmd == nil || done == nil {
 		return nil
@@ -163,6 +218,10 @@ func (w *Wrapper) Stop() error {
 		return nil
 	case <-time.After(stopGrace):
 		_ = forceKillProcess(cmd)
+		// The process is dead, but a reader goroutine may still be blocked
+		// sending to an undrained out channel; unblock it so done can close
+		// instead of waiting on it forever.
+		stop.close()
 		<-done
 		return nil
 	}
@@ -188,12 +247,9 @@ func (w *Wrapper) Restart() error {
 	if err := w.Stop(); err != nil {
 		return err
 	}
-	w.mu.Lock()
-	if w.abandon {
-		w.mu.Unlock()
-		return nil
-	}
-	w.mu.Unlock()
+	// start() re-checks abandon itself right before committing the new
+	// process's state, closing the race where Abandon() lands between this
+	// call and that commit.
 	return w.start()
 }
 
