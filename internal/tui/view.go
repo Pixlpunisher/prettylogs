@@ -113,21 +113,20 @@ func (m Model) headerView() string {
 	if m.frozenCounts != nil {
 		counts = m.frozenCounts
 	}
-	filter := m.store.Query()
-	if filter == "" {
-		filter = "_______"
-	}
-	level := m.store.Level()
-	title := m.styles.Wordmark.Render(wordmark)
-	search := fmt.Sprintf("🔍 Filter: [%s]", filter)
-	stats := fmt.Sprintf("📊 ERROR %d │ WARN %d │ INFO %d │ DEBUG %d",
+	info := fmt.Sprintf("📊 ERROR %d │ WARN %d │ INFO %d │ DEBUG %d",
 		counts[record.LevelError], counts[record.LevelWarn], counts[record.LevelInfo], counts[record.LevelDebug])
-	badge := m.statusBadge()
-	meta := m.styles.Dim.Render(fmt.Sprintf("%s │ %s", search, stats)) + " │ " + badge
-	if level != "All" {
-		meta = m.styles.Dim.Render(fmt.Sprintf("%s │ level:%s", search, level)) + " │ " + badge
+	if level := m.store.Level(); level != "All" {
+		info = "level:" + level
 	}
-	line := title + " │ " + meta
+	if query := m.store.Query(); query != "" {
+		info = fmt.Sprintf("🔍 Filter: [%s] │ %s", query, info)
+	}
+	follow := "⏸ paused"
+	if m.follow {
+		follow = "▼ following"
+	}
+	meta := m.styles.Dim.Render(info+" │ "+follow) + " │ " + m.statusBadge()
+	line := m.styles.Wordmark.Render(wordmark) + " │ " + meta
 	if m.width > 0 {
 		return lipgloss.NewStyle().MaxWidth(m.width).Render(line)
 	}
@@ -158,7 +157,7 @@ func (m Model) footerView(rows []row) string {
 	if n > 0 {
 		pos = m.selected + 1
 	}
-	text := fmt.Sprintf("%d/%d  │  ? help  │  / search  │  y pretty copy  │  Y raw copy  │  l level  │  r restart │  q quit", pos, n)
+	text := fmt.Sprintf("%d/%d  │  space open  │  / search  │  ? help  │  q quit", pos, n)
 	if m.copyStatus != "" {
 		text = m.copyStatus + "  │  " + text
 	}
@@ -229,7 +228,7 @@ func (m Model) renderGroup(r row, selected bool) string {
 		}
 		block = header + "\n" + detailBlock
 	} else {
-		hint := m.styles.Dim.Render(fmt.Sprintf("⋯ %d similar rows folded — press enter to expand", len(r.group)))
+		hint := m.styles.Dim.Render(fmt.Sprintf("⋯ %d similar rows folded — press enter or space to expand", len(r.group)))
 		block = header + "\n" + hint
 	}
 	return m.wrapRow(first.Level, selected, block)

@@ -17,6 +17,9 @@ type Record struct {
 	Source    string
 	Raw       string
 	Extra     map[string]string
+
+	// RestartMarker records carry no log line: they mark where a restarted command's output begins.
+	RestartMarker bool
 }
 
 func FirstLine(s string) string {

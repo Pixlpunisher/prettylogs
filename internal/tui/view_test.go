@@ -500,11 +500,11 @@ func TestFooterOmitsColorProfile(t *testing.T) {
 	}
 }
 
-func TestFooterShowsCopyHints(t *testing.T) {
+func TestFooterShowsCoreHints(t *testing.T) {
 	t.Parallel()
 	m := newTestModel()
 	content := ansi.Strip(m.View().Content)
-	for _, want := range []string{"y pretty copy", "Y raw copy"} {
+	for _, want := range []string{"space open", "/ search", "? help", "q quit"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("footer missing %q:\n%s", want, content)
 		}
@@ -804,7 +804,7 @@ func TestRestartNoOpWithoutWrapper(t *testing.T) {
 	}
 }
 
-func TestRestartAfterExitResetsCompilingAndKeepsLogs(t *testing.T) {
+func TestRestartAfterExitResetsCompilingAndClearsLogs(t *testing.T) {
 	out := make(chan record.Record, 8)
 	w, err := wrapper.StartCommand("true", nil, parser.AutoParser{}, out)
 	if err != nil {
@@ -836,10 +836,15 @@ func TestRestartAfterExitResetsCompilingAndKeepsLogs(t *testing.T) {
 	if m.exitCode != nil {
 		t.Fatalf("exit code should be cleared, got %d", *m.exitCode)
 	}
+	updated, _ = m.Update(logMsg{rec: <-out})
+	m = updated.(Model)
+	if m.store.Len() != 0 {
+		t.Fatalf("restart marker should clear prior logs, got %d", m.store.Len())
+	}
 	updated, _ = m.Update(logMsg{rec: record.Record{Level: record.LevelInfo, Message: "after", Raw: "after"}})
 	m = updated.(Model)
-	if m.store.Len() != 2 {
-		t.Fatalf("store should keep prior logs and accept new ones, got %d", m.store.Len())
+	if m.store.Len() != 1 {
+		t.Fatalf("store should accept the new run's logs, got %d", m.store.Len())
 	}
 }
 
@@ -901,5 +906,44 @@ func TestExpandedLongErrorScrollReachesTail(t *testing.T) {
 	content := ansi.Strip(m.View().Content)
 	if !strings.Contains(content, longErrorTail) {
 		t.Fatalf("paging to the bottom of detail should show the long-line tail:\n%s", content)
+	}
+}
+
+func TestSpaceTogglesExpand(t *testing.T) {
+	m := newTestModel(record.Record{Message: "boom", Raw: "boom\n  at Pool.connect (/src/db/pool.ts:45)"})
+	updated, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = updated.(Model)
+	if !strings.Contains(m.View().Content, "Pool.connect") {
+		t.Fatal("space should expand the selected entry")
+	}
+}
+
+func TestLevelKeys(t *testing.T) {
+	m := newTestModel(
+		record.Record{Level: record.LevelError, Message: "e", Raw: "e"},
+		record.Record{Level: record.LevelWarn, Message: "w", Raw: "w"},
+		record.Record{Level: record.LevelInfo, Message: "i", Raw: "i"},
+	)
+	for _, tc := range []struct {
+		key  string
+		want int
+	}{{"e", 1}, {"w", 2}, {"a", 3}} {
+		updated, _ := m.handleKey(keyMsg(tc.key))
+		m = updated.(Model)
+		if got := len(m.store.Filtered()); got != tc.want {
+			t.Fatalf("key %q: got %d records, want %d", tc.key, got, tc.want)
+		}
+	}
+}
+
+func TestHeaderShowsFollowState(t *testing.T) {
+	m := newTestModel(record.Record{Message: "a", Raw: "a"}, record.Record{Message: "b", Raw: "b"})
+	if !strings.Contains(m.headerView(), "following") {
+		t.Fatal("header should say following on start")
+	}
+	updated, _ := m.handleKey(keyMsg("k"))
+	m = updated.(Model)
+	if !strings.Contains(m.headerView(), "paused") {
+		t.Fatal("header should say paused after moving up")
 	}
 }

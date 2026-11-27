@@ -41,13 +41,14 @@ hash -r
 ```bash
 prettylogs nx serve backend-service-api
 prettylogs npm run dev
+prettylogs testdata/samples/json.log
 cat testdata/samples/json.log | prettylogs
 prettylogs --input
 prettylogs --format json npm run start
 prettylogs --config ~/.prettyLogs/config npm run dev
 ```
 
-Format is auto-detected unless you pass `--format`: `json`, `logfmt`, `syslog`, or `plain`. A pipe with no command args is enough; `--input` forces stdin (and skips wrapping a command).
+Format is auto-detected unless you pass `--format`: `json`, `logfmt`, `syslog`, or `plain`. A pipe with no command args is enough; `--input` forces stdin (and skips wrapping a command). A single argument that is a non-executable file is opened as a log file; an executable file is run as a command.
 
 ## Keys
 
@@ -55,14 +56,15 @@ Format is auto-detected unless you pass `--format`: `json`, `logfmt`, `syslog`, 
 |-----|--------|
 | `j` / `↓` | Move down (scrolls expanded detail if it doesn't fit) |
 | `k` / `↑` | Move up (scrolls expanded detail if it doesn't fit) |
-| `Enter` | Expand/collapse selected entry or group |
+| `Enter` / `Space` | Expand/collapse selected entry or group |
 | `/` | Search (regex) |
 | `n` / `N` | Next/previous match |
 | `l` | Filter by log level |
+| `e` / `w` / `a` | Show errors only / warnings and errors / all levels |
 | `y` | Copy selected (pretty: long stacks are collapsed) |
 | `Y` | Copy selected (raw) |
-| `r` | Restart the wrapped command (no-op when reading stdin) |
-| `g` / `G` | First/last (or top/bottom of scrolling detail) |
+| `r` | Restart the wrapped command and clear its old logs (no-op when reading stdin) |
+| `g` / `G` | First/last (or top/bottom of scrolling detail); `G` also resumes following new logs |
 | `PageDown` / `PageUp` | Page (or page through detail) |
 | `t` | Choose theme (from help) |
 | `?` | Help |

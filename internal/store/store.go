@@ -9,6 +9,9 @@ import (
 
 const DefaultMaxSize = 50_000
 
+// LevelWarnAndUp is a level filter that keeps WARN and ERROR records.
+const LevelWarnAndUp = "WARN+"
+
 type Store struct {
 	mu       sync.RWMutex
 	records  []*record.Record
@@ -119,6 +122,14 @@ func (s *Store) SetLevel(level string) {
 	s.rebuild()
 }
 
+// Clear drops all records but keeps the level filter and search.
+func (s *Store) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records = nil
+	s.filtered = nil
+}
+
 func (s *Store) SetSearch(query string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -146,7 +157,7 @@ func (s *Store) rebuild() {
 }
 
 func (s *Store) matches(r *record.Record) bool {
-	if s.level != "" && r.Level != s.level {
+	if !levelMatches(s.level, r.Level) {
 		return false
 	}
 	if s.query == "" {
@@ -156,6 +167,17 @@ func (s *Store) matches(r *record.Record) bool {
 		return false
 	}
 	return s.pattern.MatchString(r.Raw) || s.pattern.MatchString(r.Message)
+}
+
+func levelMatches(filter, level string) bool {
+	switch filter {
+	case "":
+		return true
+	case LevelWarnAndUp:
+		return level == record.LevelError || level == record.LevelWarn
+	default:
+		return level == filter
+	}
 }
 
 // removeID drops the evicted record from filtered if it's present. Both

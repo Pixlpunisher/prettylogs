@@ -241,9 +241,12 @@ func TestRestartAfterExitStartsAgain(t *testing.T) {
 	if err := w.Restart(); err != nil {
 		t.Fatalf("restart: %v", err)
 	}
-	second := collectN(t, out, 1)
-	if !strings.Contains(second[0].Message, "once") {
-		t.Fatalf("restarted run message %q", second[0].Message)
+	second := collectN(t, out, 2)
+	if !second[0].RestartMarker {
+		t.Fatalf("restart should send a marker first, got %+v", second[0])
+	}
+	if !strings.Contains(second[1].Message, "once") {
+		t.Fatalf("restarted run message %q", second[1].Message)
 	}
 }
 

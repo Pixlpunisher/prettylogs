@@ -247,6 +247,14 @@ func (w *Wrapper) Restart() error {
 	if err := w.Stop(); err != nil {
 		return err
 	}
+	w.mu.Lock()
+	abandoned := w.abandon
+	w.mu.Unlock()
+	if !abandoned {
+		// Stop() returns only after the old run's readers are done, so the
+		// marker lands after its last record and before the new run's first.
+		w.out <- record.Record{RestartMarker: true}
+	}
 	// start() re-checks abandon itself right before committing the new
 	// process's state, closing the race where Abandon() lands between this
 	// call and that commit.
