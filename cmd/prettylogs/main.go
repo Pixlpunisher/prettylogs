@@ -51,7 +51,17 @@ func run() error {
 	logCh := make(chan record.Record, 256)
 	var w *wrapper.Wrapper
 
-	if useStdin {
+	if !useStdin && len(args) == 1 && isLogFile(args[0]) {
+		f, err := os.Open(args[0])
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		go func() {
+			wrapper.StreamReader(f, p, logCh, nil)
+			close(logCh)
+		}()
+	} else if useStdin {
 		go func() {
 			wrapper.StreamReader(os.Stdin, p, logCh, nil)
 			close(logCh)
@@ -75,11 +85,19 @@ func run() error {
 	return nil
 }
 
+// isLogFile reports whether arg names a file to read. Executable files are
+// run as commands, so "prettylogs ./start.sh" still wraps the script.
+func isLogFile(arg string) bool {
+	info, err := os.Stat(arg)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 == 0
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, `prettylogs — interactive log viewer
 
 Usage:
   prettylogs [flags] <command> [args...]
+  prettylogs [flags] <file>
   prettylogs --input
   command | prettylogs
 
@@ -91,6 +109,7 @@ Flags:
 Examples:
   prettylogs nx serve backend-service-api
   prettylogs npm run dev
+  prettylogs app.log
   cat app.log | prettylogs
   prettylogs --format json npm run start
 `)

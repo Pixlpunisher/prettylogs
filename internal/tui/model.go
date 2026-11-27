@@ -185,7 +185,7 @@ func (m *Model) bodyHeight() int {
 		h--
 	}
 	if m.filtering {
-		h -= 7
+		h -= len(levelOptions) + 2
 	}
 	if h < 1 {
 		return 1

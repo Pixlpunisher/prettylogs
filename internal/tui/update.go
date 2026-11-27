@@ -7,6 +7,8 @@ import (
 
 	"github.com/tcontardo/prettylogs/internal/config"
 	"github.com/tcontardo/prettylogs/internal/parser"
+	"github.com/tcontardo/prettylogs/internal/record"
+	"github.com/tcontardo/prettylogs/internal/store"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -18,6 +20,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case logMsg:
+		if msg.rec.RestartMarker {
+			m.store.Clear()
+			m.expanded = make(map[uint64]bool)
+			m.detailScrollKey = 0
+			m.detailScrollOffset = 0
+			m.selected = 0
+			m.follow = true
+			m.syncExpandFreeze()
+			return m, waitForLog(m.logs)
+		}
 		wasFollow := m.follow
 		m.store.Add(msg.rec)
 		if wasFollow {
@@ -121,7 +133,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.movePage(1)
 	case "pgup", "ctrl+k":
 		m.movePage(-1)
-	case "enter":
+	case "enter", "space":
 		return m, m.toggleExpand()
 	case "/":
 		m.searching = true
@@ -131,6 +143,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(1)
 	case "N", "shift+n":
 		m.move(-1)
+	case "e":
+		m.setLevel(record.LevelError)
+	case "w":
+		m.setLevel(store.LevelWarnAndUp)
+	case "a":
+		m.setLevel("All")
 	case "l":
 		m.filtering = true
 		m.filterIdx = indexOf(levelOptions, m.store.Level())
@@ -288,14 +306,18 @@ func (m Model) handleFilter(key string) (tea.Model, tea.Cmd) {
 			m.filterIdx--
 		}
 	case "enter":
-		m.store.SetLevel(levelOptions[m.filterIdx])
+		m.setLevel(levelOptions[m.filterIdx])
 		m.filtering = false
-		m.clampSelected()
-		m.follow = false
 	case "ctrl+c", "q":
 		return m.quit()
 	}
 	return m, nil
+}
+
+func (m *Model) setLevel(level string) {
+	m.store.SetLevel(level)
+	m.clampSelected()
+	m.follow = false
 }
 
 func (m Model) quit() (tea.Model, tea.Cmd) {
